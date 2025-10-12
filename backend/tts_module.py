@@ -1,15 +1,31 @@
-# Uses Coqui TTS for nearly real-time audio streaming (simplified here)
-from TTS.api import TTS
+import numpy as np
 import asyncio
+from piper.voice import PiperVoice
 
-tts_model = TTS(model_name="tts_models/en/vctk/vits").to("cuda")
+MODEL_PATH = "./models/en_US-amy.onnx"
+voice = PiperVoice.load(MODEL_PATH)
 
-async def tts_stream(text):
-    # Generate audio file quickly (can chunk for real streaming)
-    tts_model.tts_to_file(text, file_path="output.wav")
-    with open("output.wav", "rb") as f:
-        data = f.read(1024)
-        while data:
-            await asyncio.sleep(0.01)
-            yield data
-            data = f.read(1024)
+async def tts_stream(text: str):
+    """Stream TTS audio chunks as they're generated"""
+    for audio_bytes in voice.synthesize(text):
+        # Convert bytes to numpy array if needed for your use case
+        # int_data = np.frombuffer(audio_bytes, dtype=np.int16)
+        await asyncio.sleep(0.001)
+        yield audio_bytes
+
+async def play_tts(text):
+    import sounddevice as sd
+    stream = sd.OutputStream(
+        samplerate=voice.config.sample_rate, 
+        channels=1, 
+        dtype='int16'
+    )
+    stream.start()
+    
+    try:
+        async for audio_chunk in tts_stream(text):
+            # int_data = np.frombuffer(audio_chunk, dtype=np.int16)
+            stream.write(text)
+    finally:
+        stream.stop()
+        stream.close()

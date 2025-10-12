@@ -2,7 +2,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from whisper_module import transcribe_audio_stream
 from llm_module import stream_llm_response
 from tts_module import tts_stream
-import asyncio
 
 app = FastAPI()
 
@@ -10,7 +9,6 @@ app = FastAPI()
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
-        # Main loop for receiving audio bytes from client (Next.js frontend)
         while True:
             audio_bytes = await websocket.receive_bytes()
             # 1. Speech-to-text using Whisper (returns text_iter)

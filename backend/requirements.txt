@@ -3,3 +3,6 @@ uvicorn
 transformers
 torch
 requests
+piper-tts
+dotenv
+sounddevice
