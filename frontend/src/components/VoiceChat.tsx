@@ -27,13 +27,16 @@ const VoiceChat = () => {
 
     wsRef.current.onmessage = (event) => {
       const message = JSON.parse(event.data);
-      
+
       if (message.type === 'transcription') {
         addMessage('user', message.data);
       } else if (message.type === 'llm_response') {
         addMessage('ai', message.data);
       } else if (message.type === 'audio_response') {
         playAudio(message.data);
+      } else if (message.type === 'error') {
+        console.error('Server error:', message.data);
+        addMessage('ai', `Error: ${message.data}`);
       }
     };
 
@@ -62,11 +65,13 @@ const VoiceChat = () => {
       for (let i = 0; i < audioBytes.length; i++) {
         audioArray[i] = audioBytes.charCodeAt(i);
       }
-      
+
       const audioBlob = new Blob([audioArray], { type: 'audio/wav' });
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-      audio.play();
+      audio.play().catch(error => {
+        console.error('Error playing audio:', error);
+      });
     } catch (error) {
       console.error('Error playing audio:', error);
     }

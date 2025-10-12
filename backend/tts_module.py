@@ -16,16 +16,16 @@ async def tts_stream(text: str):
 async def play_tts(text):
     import sounddevice as sd
     stream = sd.OutputStream(
-        samplerate=voice.config.sample_rate, 
-        channels=1, 
+        samplerate=voice.config.sample_rate,
+        channels=1,
         dtype='int16'
     )
     stream.start()
-    
+
     try:
         async for audio_chunk in tts_stream(text):
-            # int_data = np.frombuffer(audio_chunk, dtype=np.int16)
-            stream.write(text)
+            int_data = np.frombuffer(audio_chunk, dtype=np.int16)
+            stream.write(int_data)
     finally:
         stream.stop()
         stream.close()
