@@ -1,8 +1,20 @@
 fastapi
 uvicorn
-transformers
-torch
+
+httpx
 requests
-piper-tts
-dotenv
-sounddevice
+
+pydantic
+python-dotenv
+python-multipart
+
+bcrypt
+PyJWT
+
+redis
+pinecone
+
+numpy
+pdfplumber
+
+python-bcrypt; platform_system == "DO_NOT_INSTALL"
