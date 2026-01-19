@@ -3,34 +3,70 @@ import React, { useEffect, useState } from 'react'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Sidebar.js:', BACKEND_URL)
-export default function Sidebar({ chats, currentChatId, setCurrentChatId, updateChats, user, onLogout, token }){
-  function createNew(){
-    // store current as-is and create new
-    const newChat = { id: 'chat-'+nanoid(6), title: 'New chat', messages: [] }
-    updateChats((prev)=>[newChat, ...prev])
+export default function Sidebar({ chats, currentChatId, setCurrentChatId, updateChats, user, onLogout, token }) {
+  function createNew() {
+    // Create temporary chat that will convert to real conversation on first message
+    const newChat = {
+      id: 'temp-' + nanoid(6),
+      title: 'New chat',
+      messages: [],
+      isTemp: true // Flag as temporary
+    }
+    updateChats((prev) => [newChat, ...prev])
     setCurrentChatId(newChat.id)
   }
 
-  function selectChat(id){
+  function selectChat(id) {
     setCurrentChatId(id)
   }
 
-  function renameChat(id, title){
-    updateChats(prev=>prev.map(c=> c.id===id? {...c, title}: c))
+  async function renameChat(id, title) {
+    updateChats(prev => prev.map(c => c.id === id ? { ...c, title } : c))
+
+    // Sync to backend if not temp
+    const chat = chats.find(c => c.id === id)
+    if (chat && !chat.isTemp) {
+      try {
+        await fetch(`${BACKEND_URL}/conversations/${id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ title })
+        })
+      } catch (e) {
+        console.error('Failed to update title:', e)
+      }
+    }
   }
 
-  function deleteChat(id){
-    updateChats(prev=>{
-      const next = prev.filter(c=> c.id !== id)
+  async function deleteChat(id) {
+    // If it's a real conversation (not temp), delete from backend
+    const chat = chats.find(c => c.id === id)
+    if (chat && !chat.isTemp) {
+      try {
+        await fetch(`${BACKEND_URL}/conversations/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      } catch (e) {
+        console.error('Failed to delete conversation:', e)
+      }
+    }
+
+    // Update local state
+    updateChats(prev => {
+      const next = prev.filter(c => c.id !== id)
       // if no chats remain, create a new one
-      if(next.length === 0){
-        const fresh = { id: 'chat-'+nanoid(6), title: 'New chat', messages: [] }
+      if (next.length === 0) {
+        const fresh = { id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true }
         setCurrentChatId(fresh.id)
         return [fresh]
       }
 
       // if deleting the current chat, move selection to first
-      if(id === currentChatId){
+      if (id === currentChatId) {
         setCurrentChatId(next[0].id)
       }
 
@@ -62,15 +98,15 @@ export default function Sidebar({ chats, currentChatId, setCurrentChatId, update
       </div>
 
       <div className="chat-list">
-        {chats.map(chat=> (
-          <div key={chat.id} className={`chat-item ${chat.id===currentChatId? 'active':''}`} onClick={()=>selectChat(chat.id)}>
+        {chats.map(chat => (
+          <div key={chat.id} className={`chat-item ${chat.id === currentChatId ? 'active' : ''}`} onClick={() => selectChat(chat.id)}>
             <input
               className="chat-title"
               value={chat.title}
-              onChange={(e)=>renameChat(chat.id, e.target.value)}
+              onChange={(e) => renameChat(chat.id, e.target.value)}
             />
             <div className="chat-meta">{chat.messages.length} msgs</div>
-            <button className="btn delete" onClick={(e)=>{ e.stopPropagation(); deleteChat(chat.id) }}>Delete</button>
+            <button className="btn delete" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id) }}>Delete</button>
           </div>
         ))}
       </div>
@@ -88,32 +124,32 @@ export default function Sidebar({ chats, currentChatId, setCurrentChatId, update
   )
 }
 
-function DarkToggle(){
+function DarkToggle() {
   const [dark, setDark] = useState(false)
   const [mounted, setMounted] = useState(false)
 
-  useEffect(()=>{
+  useEffect(() => {
     // run only on client to avoid SSR/content mismatch
-    try{
+    try {
       const saved = localStorage.getItem('cognitiveai_dark')
       const initial = saved === 'true'
       setDark(initial)
       document.documentElement.classList.toggle('light', initial)
       document.documentElement.classList.toggle('dark', !initial)
-    }catch(e){
+    } catch (e) {
       // ignore
     }
     setMounted(true)
   }, [])
 
-  function toggle(){
+  function toggle() {
     const next = !dark
     setDark(next)
-    try{
+    try {
       localStorage.setItem('cognitiveai_dark', String(next))
       document.documentElement.classList.toggle('light', next)
       document.documentElement.classList.toggle('dark', !next)
-    }catch(e){ }
+    } catch (e) { }
   }
 
   // during SSR render nothing to avoid mismatch

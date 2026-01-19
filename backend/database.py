@@ -80,6 +80,9 @@ class Database:
                 )
             ''')
 
+            # Drop old chats table (replaced by conversations + messages)
+            conn.execute('DROP TABLE IF EXISTS chats')
+
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS conversations (
                     conversation_id TEXT PRIMARY KEY,
