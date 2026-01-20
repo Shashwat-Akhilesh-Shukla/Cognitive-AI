@@ -42,15 +42,9 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # Copy backend source code
 COPY backend/ ./backend/
 
-# Copy built frontend from builder stage
-COPY --from=frontend-builder /app/frontend/.next ./frontend/.next
-COPY --from=frontend-builder /app/frontend/node_modules ./frontend/node_modules
-COPY --from=frontend-builder /app/frontend/package*.json ./frontend/
-COPY --from=frontend-builder /app/frontend/next.config.js ./frontend/
-COPY frontend/pages ./frontend/pages
-COPY frontend/components ./frontend/components
-COPY frontend/styles ./frontend/styles
-COPY frontend/assets ./frontend/assets
+# Copy entire built frontend from builder stage
+# This includes .next, node_modules, and all source files
+COPY --from=frontend-builder /app/frontend ./frontend
 
 # Copy startup script
 COPY start.sh ./
