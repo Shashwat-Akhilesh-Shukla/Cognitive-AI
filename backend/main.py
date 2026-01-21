@@ -12,8 +12,9 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends, Header
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 import uvicorn
 import logging
@@ -41,24 +42,11 @@ app = FastAPI(
     version="2.0.0"
 )
 
-frontend_url = os.getenv(
-    "FRONTEND_URL",
-    "https://cognitiveai-v1-frontend.onrender.com"
-).rstrip("/")
+# Mount static files for frontend
+static_path = Path(__file__).parent.parent / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-allow_origins = [
-    frontend_url,
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 
@@ -262,9 +250,12 @@ async def startup_event():
 
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """Root endpoint."""
+    """Serve the static frontend HTML."""
+    static_path = Path(__file__).parent.parent / "static" / "index.html"
+    if static_path.exists():
+        return static_path.read_text()
     return {"message": "CognitiveAI API (Multi-User)", "status": "running"}
 
 

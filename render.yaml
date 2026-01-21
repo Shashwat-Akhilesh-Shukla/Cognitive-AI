@@ -26,18 +26,10 @@ services:
         value: "3600"
       - key: JINA_API_KEY
         sync: false
-      - key: FRONTEND_URL
-        value: https://ai-therapist.onrender.com
-      - key: NODE_ENV
-        value: production
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: PORT
+        value: "8000"
     
     # Auto-deploy on git push
-    autoDeploy: true
-    
-    # Build command (uses Dockerfile)
-    # No need to specify, Render will use Dockerfile automatically
-    
-    # Start command (defined in Dockerfile CMD)
-    # No need to specify, uses Dockerfile CMD
+    autoDeploy: false

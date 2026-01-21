@@ -14,13 +14,16 @@ venv/
 ENV/
 env/
 
-# Node
+# Node (entire frontend directory - using static files instead)
+frontend/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .next/
 out/
+package.json
+package-lock.json
 
 # Database files (will be recreated or use persistent volume)
 *.db
@@ -65,3 +68,7 @@ __tests__/
 dist/
 build/
 *.egg-info/
+
+# Old startup scripts
+start.sh
+docker-compose.yml
