@@ -1,0 +1,683 @@
+# Voice Agent Implementation Plan
+
+## Overview
+
+This plan outlines the implementation of near real-time voice agent functionality for the AI Therapist application. The voice mode will coexist with the existing text chat, allowing users to seamlessly switch between modes.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Model Selection & Performance Trade-offs**
+> - **Whisper Model**: Planning to use `openai/whisper-medium` (769MB) for optimal balance between accuracy and latency. Alternative: `whisper-small` (244MB) for faster inference but lower accuracy. Please confirm preference.
+> - **TTS Solution**: Recommending **Coqui TTS** (local, free) or **ElevenLabs API** (paid, lowest latency). Budget and latency requirements will determine final choice.
+> - **Model Caching**: Models will be cached in `backend/models/` directory (excluded from git). First run will download ~1GB of models.
+
+> [!WARNING]
+> **Breaking Changes**
+> - New WebSocket endpoint `/ws/voice` will be added for real-time audio streaming
+> - Frontend will require additional dependencies: `recorder.js` for audio recording, WebSocket client
+> - Backend will require ~1-2GB disk space for model storage
+> - Increased memory usage during voice sessions (~2-4GB RAM for Whisper inference)
+
+---
+
+## Proposed Changes
+
+### Component 1: Frontend UI/UX
+
+#### [NEW] [VoiceModeToggle.js](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/frontend/components/VoiceModeToggle.js)
+
+**Purpose**: Toggle button to switch between text and voice modes
+
+**Implementation**:
+- Simple toggle button in chat header
+- Icon changes: microphone for voice mode, keyboard for text mode
+- Smooth transition animation
+- State management for current mode
+
+---
+
+#### [NEW] [VoiceVisualizer.js](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/frontend/components/VoiceVisualizer.js)
+
+**Purpose**: ChatGPT-style animated gradient circle for voice conversation
+
+**Implementation**:
+- Animated gradient circle with pulsing effect
+- States:
+  - **Idle**: Subtle breathing animation
+  - **Listening**: Active pulsing (user speaking)
+  - **Processing**: Rotating gradient (STT/LLM processing)
+  - **Speaking**: Wave-like animation (TTS playback)
+- CSS animations using `@keyframes` for smooth 60fps performance
+- Gradient colors: Blue → Purple → Pink (customizable)
+
+---
+
+#### [MODIFY] [Chat.js](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/frontend/components/Chat.js)
+
+**Changes**:
+- Add voice mode state toggle
+- Conditionally render `VoiceVisualizer` when in voice mode
+- Conditionally render text input when in text mode
+- Add WebSocket connection management for voice streaming
+- Audio recording logic using Web Audio API
+- Audio playback for TTS responses
+
+**Key Features**:
+- Audio recording with `MediaRecorder` API
+- Real-time audio chunk streaming via WebSocket
+- Audio playback queue for TTS responses
+- Error handling for microphone permissions
+
+---
+
+#### [MODIFY] [package.json](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/frontend/package.json)
+
+**New Dependencies**:
+```json
+{
+  "recorder.js": "^1.0.7",
+  "lamejs": "^1.2.1"
+}
+```
+
+**Purpose**:
+- `recorder.js`: Audio recording utilities
+- `lamejs`: MP3 encoding for audio compression (reduces bandwidth)
+
+---
+
+### Component 2: Backend Speech-to-Text (STT)
+
+#### [NEW] [backend/voice/stt.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/voice/stt.py)
+
+**Purpose**: Whisper-based speech-to-text with optimized loading and caching
+
+**Implementation**:
+
+```python
+class WhisperSTT:
+    def __init__(self, model_name="openai/whisper-medium", cache_dir="backend/models"):
+        """
+        Initialize Whisper model with HuggingFace caching
+        
+        Args:
+            model_name: HuggingFace model identifier
+            cache_dir: Local directory for model caching
+        """
+        # Model loads from cache if exists, downloads once if not
+        # Uses transformers pipeline for optimized inference
+        
+    async def transcribe(self, audio_bytes: bytes) -> str:
+        """
+        Transcribe audio to text
+        
+        Optimizations:
+        - Use fp16 (half precision) for 2x faster inference
+        - Batch processing for multiple chunks
+        - VAD (Voice Activity Detection) to skip silence
+        """
+```
+
+**Optimizations**:
+1. **Model Caching**: 
+   - Models stored in `backend/models/` (gitignored)
+   - HuggingFace `transformers` library handles caching automatically
+   - First run downloads model (~769MB for medium), subsequent runs load from disk
+
+2. **Latency Reduction**:
+   - Use `faster-whisper` library (C++ optimized, 4x faster than vanilla Whisper)
+   - FP16 precision on GPU (if available) or INT8 quantization on CPU
+   - Streaming transcription: process audio chunks as they arrive
+   - VAD preprocessing to skip silent segments
+
+3. **Memory Management**:
+   - Lazy loading: model loads on first voice request, not at startup
+   - Singleton pattern: one model instance shared across all users
+   - Automatic cleanup after inactivity
+
+---
+
+#### [NEW] [backend/voice/audio_utils.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/voice/audio_utils.py)
+
+**Purpose**: Audio processing utilities
+
+**Features**:
+- Audio format conversion (WebM → WAV)
+- Resampling to 16kHz (Whisper requirement)
+- Noise reduction (optional, using `noisereduce` library)
+- Audio chunk buffering for streaming
+
+---
+
+### Component 3: Backend Text-to-Speech (TTS)
+
+#### [NEW] [backend/voice/tts.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/voice/tts.py)
+
+**Purpose**: Low-latency text-to-speech synthesis
+
+**Implementation Options** (in order of recommendation):
+
+##### Option 1: **Coqui TTS** (Recommended for Cost)
+- **Pros**: Free, local, good quality, 1-2s latency
+- **Cons**: Requires model download (~500MB), higher CPU usage
+- **Model**: `tts_models/en/ljspeech/tacotron2-DDC`
+
+```python
+class CoquiTTS:
+    def __init__(self, model_name="tts_models/en/ljspeech/tacotron2-DDC"):
+        # Cached locally in backend/models/
+        
+    async def synthesize(self, text: str) -> bytes:
+        # Returns WAV audio bytes
+        # Latency: ~1-2s for 10-word sentence
+```
+
+##### Option 2: **ElevenLabs API** (Recommended for Latency)
+- **Pros**: Lowest latency (200-500ms), highest quality, natural voices
+- **Cons**: Paid ($5/month for 30k chars, ~10 hours of audio)
+- **API**: Streaming endpoint for real-time synthesis
+
+```python
+class ElevenLabsTTS:
+    async def synthesize_stream(self, text: str) -> AsyncIterator[bytes]:
+        # Streams audio chunks as they're generated
+        # Latency: ~200-500ms to first audio chunk
+```
+
+##### Option 3: **Google Cloud TTS** (Balanced)
+- **Pros**: Good quality, reasonable pricing ($4/1M chars), reliable
+- **Cons**: Requires GCP setup, ~500ms-1s latency
+- **Voices**: WaveNet voices for natural speech
+
+**Recommendation**: Start with **Coqui TTS** for zero cost, switch to **ElevenLabs** if latency is critical.
+
+---
+
+### Component 4: WebSocket Architecture
+
+#### [MODIFY] [backend/main.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/main.py)
+
+**New WebSocket Endpoint**: `/ws/voice`
+
+**Purpose**: Real-time bidirectional audio streaming
+
+**Flow**:
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant WebSocket
+    participant STT
+    participant LLM
+    participant TTS
+
+    User->>Frontend: Click voice mode
+    Frontend->>WebSocket: Connect /ws/voice
+    WebSocket-->>Frontend: Connection established
+    
+    User->>Frontend: Speak
+    Frontend->>WebSocket: Stream audio chunks
+    WebSocket->>STT: Transcribe audio
+    STT-->>WebSocket: Text transcript
+    
+    WebSocket->>LLM: Process message
+    LLM-->>WebSocket: Response text
+    
+    WebSocket->>TTS: Synthesize speech
+    TTS-->>WebSocket: Audio chunks
+    WebSocket-->>Frontend: Stream audio response
+    Frontend->>User: Play audio
+```
+
+**Implementation**:
+
+```python
+@app.websocket("/ws/voice")
+async def voice_websocket(websocket: WebSocket, token: str):
+    """
+    WebSocket endpoint for voice chat
+    
+    Message Protocol:
+    - Client → Server: {"type": "audio", "data": base64_audio_chunk}
+    - Server → Client: {"type": "transcript", "text": "..."}
+    - Server → Client: {"type": "audio", "data": base64_audio_chunk}
+    - Server → Client: {"type": "status", "state": "listening|processing|speaking"}
+    """
+    await websocket.accept()
+    
+    # Authenticate user from token
+    user_id = verify_token(token)
+    
+    # Initialize audio buffer
+    audio_buffer = AudioBuffer()
+    
+    try:
+        while True:
+            # Receive audio chunk from client
+            message = await websocket.receive_json()
+            
+            if message["type"] == "audio":
+                # Buffer audio chunks
+                audio_buffer.add(message["data"])
+                
+                # Transcribe when buffer reaches threshold (e.g., 3 seconds)
+                if audio_buffer.is_ready():
+                    # STT
+                    transcript = await stt.transcribe(audio_buffer.get_audio())
+                    await websocket.send_json({"type": "transcript", "text": transcript})
+                    
+                    # Process through LLM (existing reasoning engine)
+                    response = await reasoning_engine.process_message(
+                        user_message=transcript,
+                        user_id=user_id,
+                        # ... existing memory retrieval
+                    )
+                    
+                    # TTS
+                    audio_chunks = tts.synthesize_stream(response["response"])
+                    async for chunk in audio_chunks:
+                        await websocket.send_json({
+                            "type": "audio",
+                            "data": base64.b64encode(chunk).decode()
+                        })
+                    
+                    audio_buffer.clear()
+    
+    except WebSocketDisconnect:
+        logger.info(f"Voice session ended for user {user_id}")
+```
+
+**Features**:
+- Token-based authentication via query parameter
+- Audio buffering for optimal transcription
+- Streaming TTS for low latency
+- Status updates for UI state management
+- Conversation history integration (same as text chat)
+
+---
+
+#### [NEW] [backend/voice/websocket_handler.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/voice/websocket_handler.py)
+
+**Purpose**: Dedicated WebSocket handler for voice sessions
+
+**Responsibilities**:
+- Connection management
+- Audio buffering logic
+- STT/TTS orchestration
+- Integration with existing conversation manager
+- Error handling and reconnection
+
+---
+
+### Component 5: Backend Dependencies
+
+#### [MODIFY] [backend/requirements.txt](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/requirements.txt)
+
+**New Dependencies**:
+
+```txt
+# Voice Processing
+transformers>=4.35.0
+faster-whisper>=0.10.0
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# TTS (choose one or both)
+TTS>=0.22.0  # Coqui TTS
+elevenlabs>=0.2.0  # ElevenLabs API (optional)
+
+# Audio Processing
+pydub>=0.25.1
+soundfile>=0.12.1
+librosa>=0.10.0
+noisereduce>=3.0.0  # Optional: noise reduction
+
+# WebSocket
+websockets>=12.0
+```
+
+**Size Estimates**:
+- `faster-whisper` + dependencies: ~500MB
+- Whisper medium model: ~769MB
+- Coqui TTS + model: ~500MB
+- **Total**: ~1.8GB first-time download
+
+---
+
+### Component 6: Model Caching Strategy
+
+#### [NEW] [backend/models/.gitignore](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/models/.gitignore)
+
+**Purpose**: Exclude large model files from git
+
+```gitignore
+# Ignore all model files
+*
+
+# Keep the .gitignore file itself
+!.gitignore
+```
+
+---
+
+#### [NEW] [backend/voice/model_manager.py](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/voice/model_manager.py)
+
+**Purpose**: Centralized model loading and caching
+
+**Features**:
+- Check if models exist locally
+- Download models on first run with progress bar
+- Lazy loading: models load on first voice request
+- Singleton pattern for memory efficiency
+- Environment variable for custom cache directory
+
+```python
+class ModelManager:
+    _instance = None
+    _stt_model = None
+    _tts_model = None
+    
+    @classmethod
+    def get_stt_model(cls):
+        """Lazy load STT model"""
+        if cls._stt_model is None:
+            cache_dir = os.getenv("MODEL_CACHE_DIR", "backend/models")
+            cls._stt_model = WhisperSTT(cache_dir=cache_dir)
+        return cls._stt_model
+    
+    @classmethod
+    def get_tts_model(cls):
+        """Lazy load TTS model"""
+        if cls._tts_model is None:
+            tts_provider = os.getenv("TTS_PROVIDER", "coqui")  # or "elevenlabs"
+            if tts_provider == "coqui":
+                cls._tts_model = CoquiTTS()
+            elif tts_provider == "elevenlabs":
+                cls._tts_model = ElevenLabsTTS(api_key=os.getenv("ELEVENLABS_API_KEY"))
+        return cls._tts_model
+```
+
+---
+
+### Component 7: Environment Configuration
+
+#### [MODIFY] [backend/.env](file:///c:/Users/passi/OneDrive/Desktop/Projects/FlagShip%20projects/AI%20Therapist/backend/.env)
+
+**New Environment Variables**:
+
+```bash
+# Voice Agent Configuration
+VOICE_ENABLED=true
+MODEL_CACHE_DIR=backend/models
+
+# STT Configuration
+WHISPER_MODEL=openai/whisper-medium  # or whisper-small for faster inference
+WHISPER_DEVICE=cpu  # or cuda if GPU available
+WHISPER_COMPUTE_TYPE=int8  # int8 for CPU, float16 for GPU
+
+# TTS Configuration
+TTS_PROVIDER=coqui  # or elevenlabs
+ELEVENLABS_API_KEY=  # Only if using ElevenLabs
+COQUI_MODEL=tts_models/en/ljspeech/tacotron2-DDC
+
+# Audio Settings
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHUNK_DURATION=3  # seconds before transcription
+MAX_AUDIO_DURATION=60  # max recording length in seconds
+```
+
+---
+
+### Component 8: Integration with Existing Features
+
+#### Conversation History
+
+**Strategy**: Voice conversations are treated identically to text conversations
+
+- Same `conversation_id` for both text and voice messages
+- Messages stored in database with `role: user/assistant`
+- Metadata field indicates mode: `{"mode": "voice", "audio_duration": 5.2}`
+- Voice transcripts displayed in chat history as text
+- Seamless switching: user can start in text, switch to voice, switch back
+
+---
+
+#### Memory Systems
+
+**No Changes Required**:
+- STM/LTM systems work identically with voice transcripts
+- Reasoning engine processes transcribed text normally
+- PDF knowledge retrieval works the same way
+
+---
+
+#### Authentication
+
+**WebSocket Authentication**:
+- Token passed as query parameter: `ws://backend/ws/voice?token=<jwt_token>`
+- Verified on connection establishment
+- User context maintained throughout session
+
+---
+
+## Verification Plan
+
+### Automated Tests
+
+#### Backend Tests
+
+**[NEW] test_voice_stt.py**
+```bash
+pytest backend/tests/test_voice_stt.py -v
+```
+
+**Tests**:
+- Model loading and caching
+- Audio transcription accuracy
+- Latency benchmarks (target: <2s for 5s audio)
+- Error handling for invalid audio formats
+
+---
+
+**[NEW] test_voice_tts.py**
+```bash
+pytest backend/tests/test_voice_tts.py -v
+```
+
+**Tests**:
+- TTS synthesis quality
+- Latency benchmarks (target: <1s for 20-word sentence)
+- Audio format validation
+- Streaming functionality
+
+---
+
+**[NEW] test_voice_websocket.py**
+```bash
+pytest backend/tests/test_voice_websocket.py -v
+```
+
+**Tests**:
+- WebSocket connection/disconnection
+- Audio chunk buffering
+- End-to-end flow: audio → transcript → response → audio
+- Concurrent user sessions
+- Error recovery
+
+---
+
+#### Frontend Tests
+
+**Manual Browser Testing**:
+- Microphone permission handling
+- Audio recording quality
+- WebSocket connection stability
+- UI state transitions (idle → listening → processing → speaking)
+- Audio playback synchronization
+- Mode switching (text ↔ voice)
+
+---
+
+### Manual Verification
+
+#### Phase 1: Model Setup
+1. Run backend with `VOICE_ENABLED=true`
+2. Verify models download to `backend/models/`
+3. Check logs for successful model loading
+4. Verify disk space usage (~1.8GB)
+
+#### Phase 2: STT Testing
+1. Record 5-second audio clip
+2. Send to `/ws/voice` endpoint
+3. Verify transcript accuracy
+4. Measure latency (target: <2s)
+
+#### Phase 3: TTS Testing
+1. Send text to TTS endpoint
+2. Verify audio quality
+3. Measure latency (target: <1s)
+4. Test streaming vs. non-streaming
+
+#### Phase 4: End-to-End Voice Chat
+1. Enable voice mode in UI
+2. Speak a question
+3. Verify:
+   - Gradient circle animates correctly
+   - Transcript appears
+   - AI response is synthesized
+   - Audio plays smoothly
+   - Conversation saved to database
+
+#### Phase 5: Integration Testing
+1. Start conversation in text mode
+2. Switch to voice mode mid-conversation
+3. Verify context is maintained
+4. Switch back to text mode
+5. Verify full history is preserved
+
+#### Phase 6: Performance Testing
+1. Test with 5 concurrent voice sessions
+2. Monitor CPU/memory usage
+3. Verify no degradation in text chat performance
+4. Test on low-bandwidth connection
+
+---
+
+## Implementation Timeline
+
+### Phase 1: Backend Foundation (Days 1-2)
+- Set up model caching infrastructure
+- Implement STT with Whisper
+- Implement TTS (Coqui initially)
+- Create audio utilities
+
+### Phase 2: WebSocket Infrastructure (Day 3)
+- Implement WebSocket endpoint
+- Audio buffering logic
+- Integration with reasoning engine
+
+### Phase 3: Frontend UI (Days 4-5)
+- Voice mode toggle
+- Gradient circle visualizer
+- Audio recording
+- WebSocket client
+
+### Phase 4: Integration & Testing (Days 6-7)
+- End-to-end testing
+- Performance optimization
+- Bug fixes
+- Documentation
+
+---
+
+## Rollout Strategy
+
+### Development
+1. Feature flag: `VOICE_ENABLED=false` by default
+2. Enable only in development environment initially
+
+### Staging
+1. Enable for internal testing
+2. Gather feedback on latency and quality
+3. Optimize based on metrics
+
+### Production
+1. Gradual rollout: 10% → 50% → 100% of users
+2. Monitor server resources (CPU, memory, bandwidth)
+3. A/B test TTS providers (Coqui vs. ElevenLabs)
+
+---
+
+## Cost & Resource Estimates
+
+### Infrastructure Costs
+
+| Component | Cost | Notes |
+|-----------|------|-------|
+| Coqui TTS | $0 | Local, free |
+| ElevenLabs TTS | $5-22/month | Optional, for premium quality |
+| Storage (models) | ~2GB | One-time download |
+| Bandwidth | Variable | ~50KB/s per voice session |
+| Compute | +50% CPU | During voice sessions |
+
+### Development Time
+- **Total**: 7-10 days for full implementation
+- **MVP** (Coqui TTS, basic UI): 4-5 days
+
+---
+
+## Risk Mitigation
+
+### Risk 1: High Latency
+**Mitigation**:
+- Use `faster-whisper` instead of vanilla Whisper
+- Implement audio chunk streaming
+- Consider cloud STT (Google/Azure) as fallback
+
+### Risk 2: Model Download Failures
+**Mitigation**:
+- Retry logic with exponential backoff
+- Mirror models on private server
+- Graceful degradation: disable voice if models unavailable
+
+### Risk 3: Poor Audio Quality
+**Mitigation**:
+- Implement noise reduction preprocessing
+- Validate audio format before processing
+- Provide user feedback for microphone issues
+
+### Risk 4: Memory Leaks
+**Mitigation**:
+- Proper cleanup of audio buffers
+- Limit concurrent voice sessions
+- Monitor memory usage with alerts
+
+---
+
+## Future Enhancements
+
+1. **Voice Cloning**: Clone user's voice for personalized responses
+2. **Multi-language Support**: Whisper supports 99 languages
+3. **Emotion Detection**: Analyze voice tone for emotional context
+4. **Voice Commands**: "Start new conversation", "Switch to text mode"
+5. **Background Noise Suppression**: Advanced noise cancellation
+6. **Offline Mode**: Download models for offline voice chat
+
+---
+
+## Appendix: Alternative Approaches
+
+### Alternative 1: Cloud-Based STT/TTS
+**Pros**: Zero model management, lower latency, higher quality
+**Cons**: Ongoing costs ($0.006/min for Google STT), privacy concerns
+
+### Alternative 2: WebRTC for Audio Streaming
+**Pros**: Lower latency, better audio quality
+**Cons**: More complex implementation, browser compatibility issues
+
+### Alternative 3: Whisper API (OpenAI)
+**Pros**: No model management, excellent accuracy
+**Cons**: $0.006/min cost, requires internet, privacy concerns

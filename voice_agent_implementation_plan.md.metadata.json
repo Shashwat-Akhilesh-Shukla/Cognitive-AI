@@ -1,0 +1,5 @@
+{
+  "artifactType": "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary": "Comprehensive implementation plan for adding near real-time voice agent functionality to the AI Therapist application. Includes UI/UX design with ChatGPT-style gradient circle, backend STT using optimized Whisper model with HuggingFace caching, TTS with low-latency solutions, WebSocket streaming architecture, and detailed integration strategy to preserve existing text chat functionality.",
+  "updatedAt": "2026-01-22T16:48:45.259971200Z"
+}
