@@ -4,6 +4,9 @@ A high-performance AI agent with short-term memory, long-term vector memory, PDF
 
 ## Core MVP Features
 
+### 1. Real Time Voice Agent Implementation
+Currently the backend is complete. Whisper for STT and Coqui for TTS. Next up Frontend Implementation.
+
 ### 1. Short-Term Memory (STM) Manager
 Maintains a rolling context window of the last N user interactions using a lightweight buffer memory with relevance scoring.
 
