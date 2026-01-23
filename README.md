@@ -7,19 +7,19 @@ A high-performance AI agent with short-term memory, long-term vector memory, PDF
 ### 1. Real Time Voice Agent Implementation
 Currently the backend is complete. Whisper for STT and Coqui for TTS. Next up Frontend Implementation.
 
-### 1. Short-Term Memory (STM) Manager
+### 2. Short-Term Memory (STM) Manager
 Maintains a rolling context window of the last N user interactions using a lightweight buffer memory with relevance scoring.
 
-### 2. Long-Term Memory (LTM) Engine
+### 3. Long-Term Memory (LTM) Engine
 Stores user facts, preferences, tasks, and past conversation highlights using vector embeddings.
 
-### 3. PDF Knowledge Loader
+### 4. PDF Knowledge Loader
 Uses Unstructured for extraction, auto-chunks, embeds, and stores PDF content into the vector database.
 
-### 4. Cognitive Loop (Reasoning Engine)
+### 5. Cognitive Loop (Reasoning Engine)
 Implements a minimal reflection cycle: input → recall → plan → respond → update memory.
 
-### 5. Minimal FastAPI Backend
+### 6. Minimal FastAPI Backend
 Clean FastAPI server with endpoints:
 - `/chat` - Main chat interface
 - `/upload_pdf` - PDF knowledge ingestion
