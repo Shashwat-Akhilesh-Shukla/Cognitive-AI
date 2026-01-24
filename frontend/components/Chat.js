@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Message from './Message'
+import VoiceVisualizer from './VoiceVisualizer'
+import VoiceModeToggle from './VoiceModeToggle'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Chat.js:', BACKEND_URL)
@@ -11,8 +13,20 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   const [error, setError] = useState('')
   const [fileInfo, setFileInfo] = useState(null)
   const [isStreaming, setIsStreaming] = useState(false)
+
+  // Voice mode state
+  const [isVoiceMode, setIsVoiceMode] = useState(false)
+  const [voiceState, setVoiceState] = useState('idle') // idle, listening, processing, speaking
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [isRecording, setIsRecording] = useState(false)
+
   const inputRef = useRef(null)
   const messagesRef = useRef(null)
+  const wsRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const audioQueueRef = useRef([])
+  const isPlayingRef = useRef(false)
 
   const current = chats.find(c => c.id === currentChatId) || { id: null, messages: [] }
 
@@ -259,48 +273,285 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     }
   }
 
+  // Voice Mode Functions
+
+  function toggleVoiceMode() {
+    if (isVoiceMode) {
+      // Switching to text mode
+      stopVoiceMode()
+    } else {
+      // Switching to voice mode
+      startVoiceMode()
+    }
+    setIsVoiceMode(!isVoiceMode)
+  }
+
+  async function startVoiceMode() {
+    try {
+      console.log('[Voice] Starting voice mode')
+
+      // Request microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+
+      // Initialize WebSocket connection
+      const wsUrl = BACKEND_URL.replace('http', 'ws') + `/ws/voice?token=${token}`
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log('[Voice] WebSocket connected')
+        setVoiceState('idle')
+      }
+
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          console.log('[Voice] Received:', data.type)
+
+          if (data.type === 'transcript') {
+            setVoiceTranscript(data.text)
+            // Add user message to chat
+            pushMessage('user', data.text)
+          } else if (data.type === 'audio') {
+            // Queue audio for playback
+            const audioData = Uint8Array.from(atob(data.data), c => c.charCodeAt(0))
+            audioQueueRef.current.push(audioData)
+            playNextAudio()
+          } else if (data.type === 'status') {
+            setVoiceState(data.state)
+          } else if (data.type === 'response') {
+            // Add AI response to chat
+            pushMessage('ai', data.text)
+          } else if (data.type === 'error') {
+            setError('Voice error: ' + data.message)
+            setVoiceState('idle')
+          }
+        } catch (e) {
+          console.error('[Voice] Failed to parse message:', e)
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('[Voice] WebSocket error:', error)
+        setError('Voice connection error')
+        stopVoiceMode()
+      }
+
+      ws.onclose = () => {
+        console.log('[Voice] WebSocket closed')
+        setVoiceState('idle')
+      }
+
+      // Initialize MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      })
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          // Convert blob to base64 and send
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            const base64 = reader.result.split(',')[1]
+            ws.send(JSON.stringify({
+              type: 'audio',
+              data: base64
+            }))
+          }
+          reader.readAsDataURL(event.data)
+        }
+      }
+
+      console.log('[Voice] Voice mode initialized')
+    } catch (err) {
+      console.error('[Voice] Failed to start voice mode:', err)
+      setError('Microphone access denied. Please allow microphone access.')
+      setIsVoiceMode(false)
+    }
+  }
+
+  function stopVoiceMode() {
+    console.log('[Voice] Stopping voice mode')
+
+    // Stop recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+
+    // Stop all tracks
+    if (mediaRecorderRef.current && mediaRecorderRef.current.stream) {
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
+    }
+
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    // Reset state
+    setVoiceState('idle')
+    setVoiceTranscript('')
+    setIsRecording(false)
+    audioQueueRef.current = []
+  }
+
+  function startRecording() {
+    if (!mediaRecorderRef.current || isRecording) return
+
+    console.log('[Voice] Starting recording')
+    setIsRecording(true)
+    setVoiceState('listening')
+    setVoiceTranscript('')
+
+    // Start recording with chunks every 1 second
+    mediaRecorderRef.current.start(1000)
+  }
+
+  function stopRecording() {
+    if (!mediaRecorderRef.current || !isRecording) return
+
+    console.log('[Voice] Stopping recording')
+    setIsRecording(false)
+    setVoiceState('processing')
+
+    mediaRecorderRef.current.stop()
+  }
+
+  async function playNextAudio() {
+    if (isPlayingRef.current || audioQueueRef.current.length === 0) return
+
+    isPlayingRef.current = true
+    setVoiceState('speaking')
+
+    const audioData = audioQueueRef.current.shift()
+
+    try {
+      // Initialize audio context if needed
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+      }
+
+      const audioContext = audioContextRef.current
+      const audioBuffer = await audioContext.decodeAudioData(audioData.buffer)
+      const source = audioContext.createBufferSource()
+      source.buffer = audioBuffer
+      source.connect(audioContext.destination)
+
+      source.onended = () => {
+        isPlayingRef.current = false
+        if (audioQueueRef.current.length > 0) {
+          playNextAudio()
+        } else {
+          setVoiceState('idle')
+        }
+      }
+
+      source.start(0)
+    } catch (err) {
+      console.error('[Voice] Audio playback error:', err)
+      isPlayingRef.current = false
+      setVoiceState('idle')
+    }
+  }
+
+  // Cleanup on unmount or chat switch
+  useEffect(() => {
+    return () => {
+      if (isVoiceMode) {
+        stopVoiceMode()
+      }
+    }
+  }, [currentChatId])
+
+
   return (
     <main className="chat-main">
+      {/* Voice Mode Toggle Button */}
+      <div className="chat-header">
+        <VoiceModeToggle
+          isVoiceMode={isVoiceMode}
+          onToggle={toggleVoiceMode}
+          disabled={isStreaming}
+        />
+      </div>
+
       <div className="messages" ref={messagesRef}>
         {current.messages && current.messages.map(m => <Message key={m.id} m={m} />)}
       </div>
 
-      {/* Attachment bar sits just above the composer, similar to ChatGPT */}
-      {attachingFile && (
-        <div className="attachment-bar">
-          <div
-            className="progress-circle"
-            style={{ background: `conic-gradient(var(--accent) ${uploadProgress * 3.6}deg, rgba(255,255,255,0.06) ${uploadProgress * 3.6}deg)` }}
-          >
-            <div className="progress-inner">{uploadProgress}%</div>
+      {/* Voice Mode UI */}
+      {isVoiceMode && (
+        <div className="voice-mode-container">
+          <VoiceVisualizer
+            state={voiceState}
+            transcript={voiceTranscript}
+          />
+
+          <div className="voice-controls">
+            <button
+              className={`voice-record-btn ${isRecording ? 'recording' : ''}`}
+              onMouseDown={startRecording}
+              onMouseUp={stopRecording}
+              onTouchStart={startRecording}
+              onTouchEnd={stopRecording}
+              disabled={voiceState === 'processing' || voiceState === 'speaking'}
+            >
+              {isRecording ? '🔴 Recording...' : '🎤 Hold to Talk'}
+            </button>
           </div>
-          <div className="attachment-name">{attachingFile.name}</div>
-          <div style={{ flex: 1 }} />
-          <button className="btn small" onClick={() => { setAttachingFile(null); setUploadProgress(0); setFileInfo(null) }}>Remove</button>
         </div>
       )}
 
-      <div className="composer">
-        <label className="attach">
-          📎
-          <input type="file" accept="application/pdf" onChange={onFileChange} />
-        </label>
-        {error && (
-          <div className="toast error">
-            {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
+      {/* Text Mode UI */}
+      {!isVoiceMode && (
+        <>
+          {/* Attachment bar sits just above the composer, similar to ChatGPT */}
+          {attachingFile && (
+            <div className="attachment-bar">
+              <div
+                className="progress-circle"
+                style={{ background: `conic-gradient(var(--accent) ${uploadProgress * 3.6}deg, rgba(255,255,255,0.06) ${uploadProgress * 3.6}deg)` }}
+              >
+                <div className="progress-inner">{uploadProgress}%</div>
+              </div>
+              <div className="attachment-name">{attachingFile.name}</div>
+              <div style={{ flex: 1 }} />
+              <button className="btn small" onClick={() => { setAttachingFile(null); setUploadProgress(0); setFileInfo(null) }}>Remove</button>
+            </div>
+          )}
+
+          <div className="composer">
+            <label className="attach">
+              📎
+              <input type="file" accept="application/pdf" onChange={onFileChange} />
+            </label>
+            {error && (
+              <div className="toast error">
+                {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
+              </div>
+            )}
+            <input
+              ref={inputRef}
+              className="text-input"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Type a message...'}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              disabled={isStreaming}
+            />
+            <button className="btn send" onClick={send} disabled={isStreaming}>{isStreaming ? 'Streaming...' : 'Send'}</button>
           </div>
-        )}
-        <input
-          ref={inputRef}
-          className="text-input"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Type a message...'}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          disabled={isStreaming}
-        />
-        <button className="btn send" onClick={send} disabled={isStreaming}>{isStreaming ? 'Streaming...' : 'Send'}</button>
-      </div>
+        </>
+      )}
+
+      {/* Error Toast (shown in both modes) */}
+      {error && isVoiceMode && (
+        <div className="toast error voice-error">
+          {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
+        </div>
+      )}
     </main>
   )
 }
