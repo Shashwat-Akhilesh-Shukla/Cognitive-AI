@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import Message from './Message'
 import VoiceVisualizer from './VoiceVisualizer'
 import VoiceModeToggle from './VoiceModeToggle'
+import EmotionDetection from './EmotionDetection'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Chat.js:', BACKEND_URL)
@@ -19,6 +20,10 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   const [voiceState, setVoiceState] = useState('idle') // idle, listening, processing, speaking
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [isRecording, setIsRecording] = useState(false)
+
+  // Emotion detection state
+  const [showEmotionDetection, setShowEmotionDetection] = useState(false)
+  const [detectedEmotion, setDetectedEmotion] = useState(null)
 
   const inputRef = useRef(null)
   const messagesRef = useRef(null)
@@ -55,11 +60,6 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
     pushMessage('user', displayedMessage, { file: fileInfo })
     setText('')
-
-    // Clear PDF state after sending the message
-    setAttachingFile(null)
-    setFileInfo(null)
-    setUploadProgress(0)
 
     // Prepare payload for backend — include conversation_id and doc_id
     const payload = { message: displayedMessage }
@@ -347,31 +347,9 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
         setVoiceState('idle')
       }
 
-      // Initialize MediaRecorder with supported MIME type
-      // Try different MIME types in order of preference
-      const mimeTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/mpeg'
-      ]
-
-      let selectedMimeType = ''
-      for (const mimeType of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mimeType)) {
-          selectedMimeType = mimeType
-          console.log('[Voice] Using MIME type:', mimeType)
-          break
-        }
-      }
-
-      if (!selectedMimeType) {
-        throw new Error('No supported audio MIME type found for MediaRecorder')
-      }
-
+      // Initialize MediaRecorder
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: selectedMimeType
+        mimeType: 'audio/webm;codecs=opus'
       })
       mediaRecorderRef.current = mediaRecorder
 
@@ -483,14 +461,6 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     }
   }
 
-  // Clear PDF state when chat is switched
-  useEffect(() => {
-    setAttachingFile(null)
-    setFileInfo(null)
-    setUploadProgress(0)
-    setError('')
-  }, [currentChatId])
-
   // Cleanup on unmount or chat switch
   useEffect(() => {
     return () => {
@@ -503,6 +473,15 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
   return (
     <main className="chat-main">
+      {/* Voice Mode Toggle Button */}
+      <div className="chat-header">
+        <VoiceModeToggle
+          isVoiceMode={isVoiceMode}
+          onToggle={toggleVoiceMode}
+          disabled={isStreaming}
+        />
+      </div>
+
       <div className="messages" ref={messagesRef}>
         {current.messages && current.messages.map(m => <Message key={m.id} m={m} />)}
       </div>
@@ -532,8 +511,8 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
       {/* Text Mode UI */}
       {!isVoiceMode && (
-        <div className="composer-wrapper">
-          {/* Attachment bar sits above the composer */}
+        <>
+          {/* Attachment bar sits just above the composer, similar to ChatGPT */}
           {attachingFile && (
             <div className="attachment-bar">
               <div
@@ -549,63 +528,34 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
           )}
 
           <div className="composer">
-            {/* File Upload Icon */}
             <label className="attach">
-              <button className="composer-icon-btn" type="button" disabled={isStreaming}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                </svg>
-              </button>
-              <input type="file" accept="application/pdf" onChange={onFileChange} disabled={isStreaming} />
+              📎
+              <input type="file" accept="application/pdf" onChange={onFileChange} />
             </label>
-
-            {/* Text Input */}
+            <button
+              className="btn camera-btn"
+              onClick={() => setShowEmotionDetection(true)}
+              title="Detect emotion with camera"
+            >
+              📷
+            </button>
+            {error && (
+              <div className="toast error">
+                {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
+              </div>
+            )}
             <input
               ref={inputRef}
               className="text-input"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Message AI Therapist..."
+              placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Type a message...'}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
               disabled={isStreaming}
             />
-
-            {/* Voice Mode Icon */}
-            <button
-              className="composer-icon-btn"
-              onClick={toggleVoiceMode}
-              disabled={isStreaming}
-              title="Switch to voice mode"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-            </button>
-
-            {/* Send Button */}
-            <button
-              className="composer-icon-btn send"
-              onClick={send}
-              disabled={isStreaming || (!text && !fileInfo)}
-              title="Send message"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            </button>
+            <button className="btn send" onClick={send} disabled={isStreaming}>{isStreaming ? 'Streaming...' : 'Send'}</button>
           </div>
-
-          {/* Error Toast */}
-          {error && (
-            <div className="toast error" style={{ marginTop: '12px', textAlign: 'center' }}>
-              {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* Error Toast (shown in both modes) */}
@@ -614,6 +564,16 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
           {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
         </div>
       )}
+
+      {/* Emotion Detection Modal */}
+      <EmotionDetection
+        isOpen={showEmotionDetection}
+        onClose={() => setShowEmotionDetection(false)}
+        onEmotionDetected={(emotionData) => {
+          setDetectedEmotion(emotionData)
+          console.log('Detected emotion:', emotionData)
+        }}
+      />
     </main>
   )
 }
