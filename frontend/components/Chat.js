@@ -56,6 +56,11 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     pushMessage('user', displayedMessage, { file: fileInfo })
     setText('')
 
+    // Clear PDF state after sending the message
+    setAttachingFile(null)
+    setFileInfo(null)
+    setUploadProgress(0)
+
     // Prepare payload for backend — include conversation_id and doc_id
     const payload = { message: displayedMessage }
 
@@ -477,6 +482,14 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       setVoiceState('idle')
     }
   }
+
+  // Clear PDF state when chat is switched
+  useEffect(() => {
+    setAttachingFile(null)
+    setFileInfo(null)
+    setUploadProgress(0)
+    setError('')
+  }, [currentChatId])
 
   // Cleanup on unmount or chat switch
   useEffect(() => {
