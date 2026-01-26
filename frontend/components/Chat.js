@@ -541,8 +541,8 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
       {/* Text Mode UI */}
       {!isVoiceMode && (
-        <>
-          {/* Attachment bar sits just above the composer, similar to ChatGPT */}
+        <div className="composer-wrapper">
+          {/* Attachment bar sits above the composer */}
           {attachingFile && (
             <div className="attachment-bar">
               <div
@@ -558,27 +558,63 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
           )}
 
           <div className="composer">
+            {/* File Upload Icon */}
             <label className="attach">
-              📎
-              <input type="file" accept="application/pdf" onChange={onFileChange} />
+              <button className="composer-icon-btn" type="button" disabled={isStreaming}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <input type="file" accept="application/pdf" onChange={onFileChange} disabled={isStreaming} />
             </label>
-            {error && (
-              <div className="toast error">
-                {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
-              </div>
-            )}
+
+            {/* Text Input */}
             <input
               ref={inputRef}
               className="text-input"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Type a message...'}
+              placeholder="Message AI Therapist..."
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
               disabled={isStreaming}
             />
-            <button className="btn send" onClick={send} disabled={isStreaming}>{isStreaming ? 'Streaming...' : 'Send'}</button>
+
+            {/* Voice Mode Icon */}
+            <button
+              className="composer-icon-btn"
+              onClick={toggleVoiceMode}
+              disabled={isStreaming}
+              title="Switch to voice mode"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </button>
+
+            {/* Send Button */}
+            <button
+              className="composer-icon-btn send"
+              onClick={send}
+              disabled={isStreaming || (!text && !fileInfo)}
+              title="Send message"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            </button>
           </div>
-        </>
+
+          {/* Error Toast */}
+          {error && (
+            <div className="toast error" style={{ marginTop: '12px', textAlign: 'center' }}>
+              {error} <button onClick={() => setError('')} className="btn small">Dismiss</button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Error Toast (shown in both modes) */}

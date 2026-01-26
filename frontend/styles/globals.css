@@ -301,39 +301,46 @@ body {
 }
 
 /* ===== COMPOSER ===== */
+.composer-wrapper {
+  padding: 16px 20px 20px 20px;
+  background: var(--bg);
+}
+
 .attachment-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
+  padding: 8px 16px;
+  margin-bottom: 8px;
+  background: var(--panel-border);
+  border-radius: 12px;
   flex-wrap: wrap;
 }
 
 .progress-circle {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   box-shadow: var(--shadow-sm);
 }
 
 .progress-inner {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .attachment-name {
-  font-weight: 600;
-  color: inherit;
+  font-weight: 500;
+  color: var(--text);
   flex: 1;
   min-width: 100px;
+  font-size: 13px;
 }
 
 .file-meta {
@@ -344,33 +351,98 @@ body {
 
 .composer {
   display: flex;
-  padding: 12px 16px;
-  gap: 12px;
   align-items: center;
-  border-top: 1px solid var(--border);
+  gap: 8px;
+  padding: 10px 12px;
   background: var(--panel);
-}
-
-.text-input {
-  flex: 1;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
-  color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 24px;
   transition: all 0.2s ease;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
-.text-input:focus {
-  outline: none;
+.composer:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
 
+.composer-icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  border-radius: 8px;
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.composer-icon-btn:hover:not(:disabled) {
+  background: var(--panel-border);
+  color: var(--text);
+}
+
+.composer-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.composer-icon-btn.send {
+  background: var(--accent);
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+}
+
+.composer-icon-btn.send:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: scale(1.05);
+}
+
+.composer-icon-btn.send:disabled {
+  background: var(--panel-border);
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.text-input {
+  flex: 1;
+  padding: 8px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  resize: none;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
 .text-input::placeholder {
   color: var(--text-secondary);
+}
+
+.text-input::-webkit-scrollbar {
+  width: 4px;
+}
+
+.text-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.text-input::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 .attach input {
