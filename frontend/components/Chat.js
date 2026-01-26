@@ -503,15 +503,6 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
   return (
     <main className="chat-main">
-      {/* Voice Mode Toggle Button */}
-      <div className="chat-header">
-        <VoiceModeToggle
-          isVoiceMode={isVoiceMode}
-          onToggle={toggleVoiceMode}
-          disabled={isStreaming}
-        />
-      </div>
-
       <div className="messages" ref={messagesRef}>
         {current.messages && current.messages.map(m => <Message key={m.id} m={m} />)}
       </div>
