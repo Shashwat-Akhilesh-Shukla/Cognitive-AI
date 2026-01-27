@@ -176,15 +176,12 @@ class AudioBuffer:
         """
         self.chunks.append(audio_data)
         
-        # Estimate duration (rough approximation)
-        # More accurate duration calculated when needed
-        try:
-            duration = self.processor.get_audio_duration(audio_data)
-            self.total_duration += duration
-        except Exception:
-            # If duration calculation fails, use rough estimate
-            # Assume ~100 bytes per 10ms at 16kHz mono
-            self.total_duration += len(audio_data) / 3200.0
+        # Use rough byte-based estimation for streaming chunks
+        # Don't try to decode incomplete WebM/audio chunks - it will fail
+        # Assume ~100 bytes per 10ms at 16kHz mono (rough approximation)
+        # This is just for buffering logic, actual duration calculated when combining
+        estimated_duration = len(audio_data) / 3200.0
+        self.total_duration += estimated_duration
     
     def is_ready(self) -> bool:
         """
@@ -273,12 +270,11 @@ class AudioValidator:
         if not audio_bytes or len(audio_bytes) == 0:
             return False
         
-        try:
-            processor = AudioProcessor()
-            duration = processor.get_audio_duration(audio_bytes)
-            return duration >= min_duration
-        except Exception:
-            return False
+        # Simple validation: check if we have enough bytes
+        # Assume ~3200 bytes per second (rough estimate for compressed audio)
+        # This avoids trying to decode incomplete/streaming chunks
+        min_bytes = int(min_duration * 3200)
+        return len(audio_bytes) >= min_bytes
     
     @staticmethod
     def validate_format(audio_bytes: bytes, allowed_formats: List[str] = None) -> bool:

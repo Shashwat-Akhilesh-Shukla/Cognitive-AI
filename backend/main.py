@@ -1392,6 +1392,52 @@ async def preload_voice_models(user_id: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Model preload failed: {str(e)}")
 
 
+@app.websocket("/ws/voice")
+async def voice_websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(...),
+    conversation_id: Optional[str] = Query(None)
+):
+    """
+    WebSocket endpoint for real-time voice chat.
+    
+    Handles bidirectional audio streaming for voice conversations.
+    Requires authentication via token query parameter.
+    """
+    if not voice_handler:
+        await websocket.close(code=1011, reason="Voice handler not initialized")
+        return
+    
+    try:
+        # Verify token
+        payload = AuthService.verify_token(token)
+        if not payload:
+            await websocket.close(code=1008, reason="Invalid or expired token")
+            return
+        
+        user_id = payload.get("user_id")
+        if not user_id:
+            await websocket.close(code=1008, reason="Token missing user_id")
+            return
+        
+        logger.info(f"Voice WebSocket connection from user {user_id}")
+        
+        # Handle connection
+        await voice_handler.handle_connection(
+            websocket=websocket,
+            user_id=user_id,
+            conversation_id=conversation_id
+        )
+    
+    except Exception as e:
+        logger.error(f"Voice WebSocket error: {e}")
+        try:
+            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+        except:
+            pass
+
+
+
 
 if __name__ == "__main__":
     uvicorn.run(
