@@ -1,0 +1,444 @@
+Run started:2026-01-27 18:12:55.250744+00:00
+
+Test results:
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\database.py:25:4
+24	        conn.execute("PRAGMA synchronous=NORMAL;")
+25	    except Exception:
+26	        
+27	        pass
+28	    return conn
+
+--------------------------------------------------
+>> Issue: [B105:hardcoded_password_string] Possible hardcoded password: 'your-secret-key-change-in-production'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html
+   Location: .\backend\main.py:193:43
+192	        jwt_secret = os.getenv("JWT_SECRET_KEY")
+193	        if not jwt_secret or jwt_secret == "your-secret-key-change-in-production":
+194	            raise RuntimeError("JWT_SECRET_KEY is required and must be set to a secure value")
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:487:12
+486	                reasoning_engine.reset_conversation_context_for_user(user_id)
+487	            except Exception:
+488	                # Engine is stateless, these are no-ops
+489	                pass
+490	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:504:16
+503	                    deleted_count += 1
+504	                except Exception:
+505	                    pass
+506	            if deleted_count > 0:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:753:20
+752	                        stm_manager.add_memory(user_id, action.get("content", ""), importance=action.get("importance", 0.8))
+753	                    except Exception:
+754	                        pass
+755	                elif action.get("type") == "ltm" and ltm_manager:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:764:20
+763	                        )
+764	                    except Exception:
+765	                        pass
+766	        except Exception:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:766:8
+765	                        pass
+766	        except Exception:
+767	            pass
+768	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:921:24
+920	                            stm_manager.add_memory(user_id, action.get("content", ""), importance=action.get("importance", 0.8))
+921	                        except Exception:
+922	                            pass
+923	                    elif action.get("type") == "ltm" and ltm_manager:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:932:24
+931	                            )
+932	                        except Exception:
+933	                            pass
+934	            except Exception:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:934:12
+933	                            pass
+934	            except Exception:
+935	                pass
+936	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1096:16
+1095	                    r.delete(f"pdf:{user_id}:{doc_id}")
+1096	                except Exception:
+1097	                    pass
+1098	                return
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1106:16
+1105	                    r.delete(f"pdf:{user_id}:{doc_id}")
+1106	                except Exception:
+1107	                    pass
+1108	                return
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1123:8
+1122	            Path(file_path).unlink(missing_ok=True)
+1123	        except Exception:
+1124	            pass
+1125	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1238:8
+1237	            r.delete(f"pdf:{user_id}:{document_id}")
+1238	        except Exception:
+1239	            pass
+1240	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1335:8
+1334	            await websocket.close(code=1011, reason=f"Session error: {str(e)}")
+1335	        except Exception:
+1336	            pass
+1337	
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\main.py:1436:8
+1435	            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+1436	        except:
+1437	            pass
+1438	
+
+--------------------------------------------------
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: .\backend\main.py:1445:13
+1444	        "main:app",
+1445	        host="0.0.0.0",
+1446	        port=8000,
+
+--------------------------------------------------
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: .\backend\main_old.py:414:13
+413	        "main:app",
+414	        host="0.0.0.0",
+415	        port=8000,
+
+--------------------------------------------------
+>> Issue: [B112:try_except_continue] Try, Except, Continue detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b112_try_except_continue.html
+   Location: .\backend\memory\stm.py:108:12
+107	                memories.append(MemoryItem.from_dict(obj))
+108	            except Exception:
+109	                continue
+110	
+
+--------------------------------------------------
+>> Issue: [B112:try_except_continue] Try, Except, Continue detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b112_try_except_continue.html
+   Location: .\backend\memory\stm.py:150:12
+149	                memories.append(MemoryItem.from_dict(obj))
+150	            except Exception:
+151	                continue
+152	
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:52:27
+51	                files = {'file': f}
+52	                response = requests.post(
+53	                    f'{self.backend_url}/upload_pdf',
+54	                    headers={'Authorization': f'Bearer {self.token}'},
+55	                    files=files
+56	                )
+57	            
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:87:23
+86	            
+87	            response = requests.post(
+88	                f'{self.backend_url}/upload_pdf',
+89	                headers={'Authorization': f'Bearer {self.token}'},
+90	                files=files
+91	            )
+92	            
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:114:23
+113	            
+114	            response = requests.post(
+115	                f'{self.backend_url}/upload_pdf',
+116	                headers={'Authorization': f'Bearer {self.token}'},
+117	                files=files
+118	            )
+119	            
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:142:23
+141	            
+142	            response = requests.post(
+143	                f'{self.backend_url}/chat',
+144	                headers=self.headers,
+145	                json=payload
+146	            )
+147	            
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:177:23
+176	            
+177	            response = requests.post(
+178	                f'{self.backend_url}/chat',
+179	                headers=self.headers,
+180	                json=payload
+181	            )
+182	            
+
+--------------------------------------------------
+>> Issue: [B113:request_without_timeout] Call to requests without timeout
+   Severity: Medium   Confidence: Low
+   CWE: CWE-400 (https://cwe.mitre.org/data/definitions/400.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b113_request_without_timeout.html
+   Location: .\backend\pdf_validation.py:200:23
+199	        try:
+200	            response = requests.get(
+201	                f'{self.backend_url}/health',
+202	                headers={'Authorization': f'Bearer {self.token}'}
+203	            )
+204	            
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\stt.py:172:16
+171	                    os.unlink(temp_path)
+172	                except Exception:
+173	                    pass
+174	        
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\tts.py:132:16
+131	                    os.unlink(temp_path)
+132	                except Exception:
+133	                    pass
+134	        
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\tts.py:204:8
+203	                return self.tts.speakers
+204	        except Exception:
+205	            pass
+206	        
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\tts.py:222:8
+221	                return self.tts.languages
+222	        except Exception:
+223	            pass
+224	        
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:444:16
+443	                            stm_list.append({'content': str(m)})
+444	                except Exception:
+445	                    pass
+446	            
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:455:16
+454	                    )
+455	                except Exception:
+456	                    pass
+457	            
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:469:16
+468	                        pdf_snippets.append(content)
+469	                except Exception:
+470	                    pass
+471	            
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:495:24
+494	                            )
+495	                        except Exception:
+496	                            pass
+497	                    
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:507:24
+506	                            )
+507	                        except Exception:
+508	                            pass
+509	            except Exception:
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\voice\websocket_handler.py:509:12
+508	                            pass
+509	            except Exception:
+510	                pass
+511	            
+
+--------------------------------------------------
+>> Issue: [B110:try_except_pass] Try, Except, Pass detected.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.3/plugins/b110_try_except_pass.html
+   Location: .\backend\wipe_data.py:65:20
+64	                        mainmod.stm_manager.clear_memories(uid)
+65	                    except Exception:
+66	                        pass
+67	                logger.info("Cleared in-memory STM memories")
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 4717
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 29
+		Medium: 8
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 6
+		Medium: 3
+		High: 28
+Files skipped (0):
