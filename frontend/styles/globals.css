@@ -46,7 +46,9 @@
   color-scheme: light;
 }
 
-html, body, #__next {
+html,
+body,
+#__next {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -67,6 +69,7 @@ body {
 * {
   box-sizing: border-box;
 }
+
 .app-root {
   display: flex;
   height: 100vh;
@@ -270,6 +273,7 @@ body {
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -302,7 +306,7 @@ body {
 
 /* ===== COMPOSER ===== */
 .composer-wrapper {
-  padding: 16px 20px 20px 20px;
+  padding: 16px 20px 24px 20px;
   background: var(--bg);
 }
 
@@ -310,11 +314,13 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
-  margin-bottom: 8px;
+  padding: 10px 16px;
+  margin: 0 auto 12px auto;
   background: var(--panel-border);
-  border-radius: 12px;
+  border-radius: 16px;
   flex-wrap: wrap;
+  max-width: 1100px;
+  box-shadow: var(--shadow-sm);
 }
 
 .progress-circle {
@@ -352,14 +358,15 @@ body {
 .composer {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 6px 16px;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 24px;
+  border: 1.5px solid var(--border);
+  border-radius: 28px;
   transition: all 0.2s ease;
-  max-width: 900px;
-  margin: 0 auto;
+  max-width: 1400px;
+  margin: 0 auto 15px auto;
+  box-shadow: var(--shadow-sm);
 }
 
 .composer:focus-within {
@@ -371,15 +378,15 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 8px;
+  padding: 0;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   transition: all 0.2s ease;
   border-radius: 8px;
-  font-size: 20px;
-  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -393,24 +400,41 @@ body {
   cursor: not-allowed;
 }
 
-.composer-icon-btn.send {
+/* Attach button specific styles */
+.composer-icon-btn.attach-btn {
+  cursor: pointer;
+}
+
+.composer-icon-btn.attach-btn:hover {
+  background: var(--panel-border);
+  color: var(--text);
+}
+
+/* Send button - ChatGPT style */
+.composer-icon-btn.send-btn {
+  background: var(--panel-border);
+  color: var(--text-secondary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.composer-icon-btn.send-btn:not(:disabled) {
   background: var(--accent);
   color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 16px;
 }
 
-.composer-icon-btn.send:hover:not(:disabled) {
+.composer-icon-btn.send-btn:hover:not(:disabled) {
   background: var(--accent-hover);
-  transform: scale(1.05);
+  transform: translateY(-1px);
 }
 
-.composer-icon-btn.send:disabled {
+.composer-icon-btn.send-btn:disabled {
   background: var(--panel-border);
   color: var(--text-secondary);
   opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .text-input {
@@ -443,10 +467,6 @@ body {
 .text-input::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 2px;
-}
-
-.attach input {
-  display: none;
 }
 
 .attachment-preview {
@@ -702,6 +722,15 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+.toast.text-mode-error {
+  max-width: 1100px;
+  margin: 0 auto 12px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .toast.voice-error {
   position: fixed;
   bottom: 20px;
@@ -834,10 +863,13 @@ body {
 
 /* Voice Visualizer Animations */
 @keyframes breathe {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }
+
   50% {
     transform: scale(1.05);
     opacity: 0.9;
@@ -845,9 +877,12 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
   }
+
   50% {
     transform: scale(1.1);
   }
@@ -857,24 +892,30 @@ body {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
 }
 
 @keyframes wave {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     border-radius: 50%;
   }
+
   25% {
     transform: scale(1.05);
     border-radius: 45%;
   }
+
   50% {
     transform: scale(1.1);
     border-radius: 50%;
   }
+
   75% {
     transform: scale(1.05);
     border-radius: 55%;
@@ -952,9 +993,12 @@ body {
 }
 
 @keyframes recordPulse {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
   }
+
   50% {
     box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
   }
@@ -966,25 +1010,24 @@ body {
     width: 160px;
     height: 160px;
   }
-  
+
   .voice-visualizer-inner {
     width: 140px;
     height: 140px;
     font-size: 36px;
   }
-  
+
   .voice-mode-container {
     padding: 20px 16px;
     min-height: 300px;
   }
-  
+
   .voice-status-text {
     font-size: 16px;
   }
-  
+
   .voice-record-btn {
     padding: 14px 28px;
     font-size: 14px;
   }
 }
-

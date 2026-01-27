@@ -8,13 +8,13 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@tensorflow/tfjs": "^4.10.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.10.0",
+    "face-api.js": "^0.22.2",
+    "nanoid": "4.0.0",
     "next": "13.4.7",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "swr": "2.2.0",
-    "nanoid": "4.0.0",
-    "face-api.js": "^0.22.2",
-    "@tensorflow/tfjs": "^4.10.0",
-    "@tensorflow/tfjs-backend-webgl": "^4.10.0"
+    "swr": "2.2.0"
   }
 }

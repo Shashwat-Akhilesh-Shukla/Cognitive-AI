@@ -12,7 +12,7 @@ bcrypt
 PyJWT
 
 redis
-pinecone-client
+pinecone
 
 numpy
 pdfplumber
