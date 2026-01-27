@@ -2,7 +2,7 @@
 Database layer for CognitiveAI with User model.
 Handles user persistence and authentication.
 """
-
+from backend.security import encrypt_message, decrypt_message
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -332,9 +332,9 @@ class Database:
         try:
             with get_connection(self.db_path) as conn:
                 conn.execute(
-                    "INSERT INTO messages (message_id, conversation_id, user_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (message_id, conversation_id, user_id, role, content, timestamp, meta_json)
-                )
+    "INSERT INTO messages (message_id, conversation_id, user_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    (message_id, conversation_id, user_id, role, encrypt_message(content), timestamp, json.dumps(metadata))
+)
                 conn.commit()
             logger.debug(f"Message stored in conversation {conversation_id}: {message_id}")
             return message_id
@@ -360,7 +360,7 @@ class Database:
                 results.append({
                     "message_id": r[0],
                     "role": r[1],
-                    "content": r[2],
+                    "content": decrypt_message(r[2]),
                     "timestamp": r[3],
                     "metadata": meta
                 })
