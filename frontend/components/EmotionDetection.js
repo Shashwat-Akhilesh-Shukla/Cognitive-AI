@@ -4,12 +4,51 @@ import * as faceapi from 'face-api.js'
 export default function EmotionDetection({ isOpen, onClose, onEmotionDetected }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
+  const streamRef = useRef(null) // Add ref to track stream
   const [emotion, setEmotion] = useState(null)
   const [confidence, setConfidence] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [detectionActive, setDetectionActive] = useState(false)
   const detectionIntervalRef = useRef(null)
+
+  // Cleanup function to stop camera
+  const stopCamera = () => {
+    console.log('[EmotionDetection] Stopping camera...')
+
+    // Stop all tracks in the stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        track.stop()
+        console.log('[EmotionDetection] Stopped track:', track.kind)
+      })
+      streamRef.current = null
+    }
+
+    // Also check video element
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => {
+        track.stop()
+        console.log('[EmotionDetection] Stopped video track:', track.kind)
+      })
+      videoRef.current.srcObject = null
+    }
+
+    // Clear detection interval
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current)
+      detectionIntervalRef.current = null
+    }
+
+    setDetectionActive(false)
+    console.log('[EmotionDetection] Camera stopped successfully')
+  }
+
+  // Enhanced close handler
+  const handleClose = () => {
+    stopCamera()
+    onClose()
+  }
 
   // Load face-api models from CDN
   useEffect(() => {
@@ -33,7 +72,10 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
 
   // Initialize webcam
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      stopCamera()
+      return
+    }
 
     const initWebcam = async () => {
       try {
@@ -41,6 +83,9 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         })
+
+        // Store stream reference
+        streamRef.current = stream
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream
@@ -57,15 +102,9 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
 
     initWebcam()
 
+    // Cleanup when component unmounts or isOpen changes
     return () => {
-      // Cleanup: stop webcam stream
-      if (videoRef.current && videoRef.current.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop())
-      }
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current)
-      }
-      setDetectionActive(false)
+      stopCamera()
     }
   }, [isOpen])
 
@@ -169,7 +208,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
       <div className="emotion-detection-modal">
         <div className="emotion-detection-header">
           <h2>Real-Time Emotion Detection</h2>
-          <button className="close-button" onClick={onClose}>×</button>
+          <button className="close-button" onClick={handleClose}>×</button>
         </div>
 
         {error && <div className="emotion-error">{error}</div>}
@@ -209,7 +248,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
         </div>
 
         <div className="emotion-detection-footer">
-          <button className="emotion-close-btn" onClick={onClose}>
+          <button className="emotion-close-btn" onClick={handleClose}>
             Close
           </button>
         </div>
