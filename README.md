@@ -25,7 +25,7 @@
 
 ## 🎯 Overview
 
-**CognitiveAI** is an enterprise-grade conversational AI platform designed for therapeutic and personal intelligence applications. It combines short-term and long-term memory systems with real-time voice capabilities, enabling natural, context-aware conversations that persist across sessions.
+**CognitiveAI/ AI Therapist** is an enterprise-grade conversational AI platform designed for therapeutic and personal intelligence applications. It combines short-term and long-term memory systems with real-time voice capabilities, enabling natural, context-aware conversations that persist across sessions.
 
 ### Key Highlights
 
