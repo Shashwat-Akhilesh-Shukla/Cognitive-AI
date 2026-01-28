@@ -295,6 +295,13 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     try {
       console.log('[Voice] Starting voice mode')
 
+      // Check if MediaRecorder is supported
+      if (!window.MediaRecorder) {
+        setError('Voice mode is not supported in this browser. Please use Chrome, Firefox, or Edge.')
+        setIsVoiceMode(false)
+        return
+      }
+
       // Request microphone permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 
@@ -349,25 +356,48 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
       // Initialize MediaRecorder with supported MIME type
       // Try different MIME types in order of preference
-      let mimeType = ''
+      let selectedMimeType = null
       const mimeTypes = [
         'audio/webm;codecs=opus',
         'audio/webm',
         'audio/ogg;codecs=opus',
-        'audio/mp4',
-        'audio/mpeg',
-        ''  // Let browser choose default
+        'audio/mp4'
       ]
 
+      // Find first supported MIME type
       for (const type of mimeTypes) {
-        if (type === '' || MediaRecorder.isTypeSupported(type)) {
-          mimeType = type
-          console.log('[Voice] Using MIME type:', mimeType || 'browser default')
+        if (MediaRecorder.isTypeSupported(type)) {
+          selectedMimeType = type
+          console.log('[Voice] Using MIME type:', selectedMimeType)
           break
         }
       }
 
-      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+      // If no specific MIME type is supported, check if MediaRecorder works at all
+      if (!selectedMimeType) {
+        console.log('[Voice] No specific MIME type supported, trying browser default')
+        // Test if MediaRecorder can be created with default settings
+        try {
+          const testRecorder = new MediaRecorder(stream)
+          testRecorder.stop()
+          console.log('[Voice] Browser default MediaRecorder works')
+        } catch (testErr) {
+          console.error('[Voice] MediaRecorder not functional:', testErr)
+          stream.getTracks().forEach(track => track.stop())
+          setError('Voice recording is not supported in this browser. Please use Chrome, Firefox, or Edge.')
+          setIsVoiceMode(false)
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close()
+          }
+          return
+        }
+      }
+
+      // Create MediaRecorder with validated MIME type
+      const mediaRecorder = selectedMimeType
+        ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+        : new MediaRecorder(stream)
+
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = (event) => {
@@ -385,10 +415,24 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
         }
       }
 
-      console.log('[Voice] Voice mode initialized')
+      mediaRecorder.onerror = (event) => {
+        console.error('[Voice] MediaRecorder error:', event.error)
+        setError('Recording error: ' + (event.error?.message || 'Unknown error'))
+        stopVoiceMode()
+      }
+
+      console.log('[Voice] Voice mode initialized successfully')
     } catch (err) {
       console.error('[Voice] Failed to start voice mode:', err)
-      setError('Microphone access denied. Please allow microphone access.')
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError('Microphone access denied. Please allow microphone access in your browser settings.')
+      } else if (err.name === 'NotFoundError') {
+        setError('No microphone found. Please connect a microphone and try again.')
+      } else if (err.name === 'NotSupportedError') {
+        setError('Voice recording is not supported in this browser. Please use Chrome, Firefox, or Edge.')
+      } else {
+        setError('Failed to start voice mode: ' + err.message)
+      }
       setIsVoiceMode(false)
     }
   }
@@ -422,13 +466,26 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   function startRecording() {
     if (!mediaRecorderRef.current || isRecording) return
 
+    // Validate MediaRecorder state before starting
+    if (mediaRecorderRef.current.state !== 'inactive') {
+      console.warn('[Voice] MediaRecorder not in inactive state:', mediaRecorderRef.current.state)
+      return
+    }
+
     console.log('[Voice] Starting recording')
     setIsRecording(true)
     setVoiceState('listening')
     setVoiceTranscript('')
 
-    // Start recording with chunks every 1 second
-    mediaRecorderRef.current.start(1000)
+    try {
+      // Start recording with chunks every 1 second
+      mediaRecorderRef.current.start(1000)
+    } catch (err) {
+      console.error('[Voice] Failed to start recording:', err)
+      setError('Failed to start recording: ' + err.message)
+      setIsRecording(false)
+      setVoiceState('idle')
+    }
   }
 
   function stopRecording() {
@@ -498,6 +555,15 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       {/* Voice Mode UI */}
       {isVoiceMode && (
         <div className="voice-mode-container">
+          {/* Close button to exit voice mode */}
+          <button
+            className="voice-close-btn"
+            onClick={toggleVoiceMode}
+            title="Exit voice mode"
+          >
+            ✕
+          </button>
+
           <VoiceVisualizer
             state={voiceState}
             transcript={voiceTranscript}

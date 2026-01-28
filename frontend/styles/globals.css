@@ -804,7 +804,43 @@ body {
   padding: 40px 20px;
   gap: 32px;
   min-height: 400px;
+  position: relative;
 }
+
+/* Voice Mode Close Button */
+.voice-close-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--panel-border);
+  color: var(--text-secondary);
+  font-size: 24px;
+  font-weight: 300;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+  line-height: 1;
+  padding: 0;
+}
+
+.voice-close-btn:hover {
+  background: var(--error);
+  color: white;
+  transform: rotate(90deg) scale(1.1);
+  box-shadow: var(--shadow-md);
+}
+
+.voice-close-btn:active {
+  transform: rotate(90deg) scale(0.95);
+}
+
 
 /* Voice Visualizer */
 .voice-visualizer-container {
