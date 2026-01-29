@@ -2,7 +2,10 @@
 Database layer for CognitiveAI with User model.
 Handles user persistence and authentication.
 """
-from backend.security import encrypt_message, decrypt_message
+from backend.security import (
+    encrypt_message, decrypt_message, 
+    generate_user_key, encrypt_user_key, decrypt_user_key, get_user_cipher
+)
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -23,22 +26,22 @@ def get_connection(db_path: str = str(DATABASE_PATH)) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
     except Exception:
-        
         pass
     return conn
 
 
 class User:
     """User data model."""
-    def __init__(self, user_id: str, username: str, password_hash: str, email: Optional[str] = None, created_at: Optional[str] = None):
+    def __init__(self, user_id: str, username: str, password_hash: str, email: Optional[str] = None, created_at: Optional[str] = None, encryption_key_encrypted: Optional[str] = None):
         self.user_id = user_id
         self.username = username
         self.password_hash = password_hash
         self.email = email
         self.created_at = created_at or datetime.utcnow().isoformat()
+        self.encryption_key_encrypted = encryption_key_encrypted
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return user data as dict (without password hash)."""
+        """Return user data as dict (without password hash or internal keys)."""
         return {
             "user_id": self.user_id,
             "username": self.username,
@@ -63,9 +66,20 @@ class Database:
                     username TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
                     email TEXT,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    encryption_key_encrypted TEXT
                 )
             """)
+            
+            # Migration check: ensure encryption_key_encrypted exists (for existing DBs)
+            cursor = conn.execute("PRAGMA table_info(users)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "encryption_key_encrypted" not in columns:
+                logger.info("Migrating users table: adding encryption_key_encrypted column")
+                try:
+                    conn.execute("ALTER TABLE users ADD COLUMN encryption_key_encrypted TEXT")
+                except Exception as e:
+                    logger.error(f"Migration failed: {e}")
 
             
             conn.execute('''
@@ -110,16 +124,22 @@ class Database:
             logger.info(f"Database initialized at {self.db_path}")
 
     def create_user(self, user_id: str, username: str, password_hash: str, email: Optional[str] = None) -> User:
-        """Create a new user in the database."""
-        user = User(user_id, username, password_hash, email)
+        """Create a new user in the database with a personal encryption key."""
+        
+        # Generate and encrypt a new user-bound key
+        raw_key = generate_user_key()
+        enc_key = encrypt_user_key(raw_key)
+
+        user = User(user_id, username, password_hash, email, encryption_key_encrypted=enc_key)
+        
         try:
             with get_connection(self.db_path) as conn:
                 conn.execute(
-                    "INSERT INTO users (user_id, username, password_hash, email, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user.user_id, user.username, user.password_hash, user.email, user.created_at)
+                    "INSERT INTO users (user_id, username, password_hash, email, created_at, encryption_key_encrypted) VALUES (?, ?, ?, ?, ?, ?)",
+                    (user.user_id, user.username, user.password_hash, user.email, user.created_at, user.encryption_key_encrypted)
                 )
                 conn.commit()
-            logger.info(f"User created: {username}")
+            logger.info(f"User created: {username} (Secure Key Generated)")
             return user
         except sqlite3.IntegrityError as e:
             logger.error(f"Failed to create user {username}: {e}")
@@ -129,24 +149,27 @@ class Database:
         """Retrieve user by username."""
         with get_connection(self.db_path) as conn:
             row = conn.execute(
-                "SELECT user_id, username, password_hash, email, created_at FROM users WHERE username = ?",
+                "SELECT user_id, username, password_hash, email, created_at, encryption_key_encrypted FROM users WHERE username = ?",
                 (username,)
             ).fetchone()
         
         if row:
-            return User(row[0], row[1], row[2], row[3], row[4])
+            # Handle schema evolution (row[5] might be missing if select * used differently, but here explicit)
+            enc_key = row[5] if len(row) > 5 else None
+            return User(row[0], row[1], row[2], row[3], row[4], enc_key)
         return None
 
     def get_user_by_id(self, user_id: str) -> Optional[User]:
         """Retrieve user by user_id."""
         with get_connection(self.db_path) as conn:
             row = conn.execute(
-                "SELECT user_id, username, password_hash, email, created_at FROM users WHERE user_id = ?",
+                "SELECT user_id, username, password_hash, email, created_at, encryption_key_encrypted FROM users WHERE user_id = ?",
                 (user_id,)
             ).fetchone()
         
         if row:
-            return User(row[0], row[1], row[2], row[3], row[4])
+            enc_key = row[5] if len(row) > 5 else None
+            return User(row[0], row[1], row[2], row[3], row[4], enc_key)
         return None
 
     def username_exists(self, username: str) -> bool:
@@ -324,17 +347,40 @@ class Database:
             return False
 
     # Message management methods
+    
+    def _get_user_cipher_suite(self, user_id: str):
+        """Helper to retrieve the correct cipher suite for a user."""
+        try:
+            # 1. Fetch user to get encryption key
+            user = self.get_user_by_id(user_id)
+            if user and user.encryption_key_encrypted:
+                # 2. Decrypt user's key with Master Key
+                raw_key = decrypt_user_key(user.encryption_key_encrypted)
+                if raw_key:
+                    # 3. Create cipher for this user
+                    return get_user_cipher(raw_key)
+            
+            # Fallback: Use Master Key (legacy)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get cipher for user {user_id}: {e}")
+            return None
+
     def add_message(self, conversation_id: str, user_id: str, role: str, content: str, timestamp: float, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Store a message in a conversation. Returns message_id."""
         import uuid
         message_id = str(uuid.uuid4())
         meta_json = json.dumps(metadata or {})
+        
+        # Get cipher for this user
+        cipher = self._get_user_cipher_suite(user_id)
+
         try:
             with get_connection(self.db_path) as conn:
                 conn.execute(
-    "INSERT INTO messages (message_id, conversation_id, user_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    (message_id, conversation_id, user_id, role, encrypt_message(content), timestamp, json.dumps(metadata))
-)
+                    "INSERT INTO messages (message_id, conversation_id, user_id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (message_id, conversation_id, user_id, role, encrypt_message(content, cipher), timestamp, json.dumps(metadata))
+                )
                 conn.commit()
             logger.debug(f"Message stored in conversation {conversation_id}: {message_id}")
             return message_id
@@ -345,6 +391,17 @@ class Database:
     def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieve messages for a conversation, ordered by timestamp."""
         try:
+            # We need to know the user_id for this conversation to fetch the right key.
+            # However, this method signature doesn't take user_id (it's optional in generic getters but usually implied).
+            # We can query the conversation first to find the owner.
+            with get_connection(self.db_path) as conn:
+                conv_row = conn.execute("SELECT user_id FROM conversations WHERE conversation_id=?", (conversation_id,)).fetchone()
+            
+            user_id = conv_row[0] if conv_row else None
+            cipher = None
+            if user_id:
+                cipher = self._get_user_cipher_suite(user_id)
+
             with get_connection(self.db_path) as conn:
                 rows = conn.execute(
                     "SELECT message_id, role, content, timestamp, metadata FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC LIMIT ? OFFSET ?",
@@ -360,7 +417,7 @@ class Database:
                 results.append({
                     "message_id": r[0],
                     "role": r[1],
-                    "content": decrypt_message(r[2]),
+                    "content": decrypt_message(r[2], cipher),
                     "timestamp": r[3],
                     "metadata": meta
                 })
@@ -382,7 +439,6 @@ class Database:
         except Exception as e:
             logger.error(f"Failed to delete messages for user {user_id}: {e}")
             return False
-
 
 
 db: Optional[Database] = None

@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react'
-import * as faceapi from 'face-api.js'
 
 export default function EmotionDetection({ isOpen, onClose, onEmotionDetected }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
-  const streamRef = useRef(null) // Add ref to track stream
+  const streamRef = useRef(null)
   const [emotion, setEmotion] = useState(null)
   const [confidence, setConfidence] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [detectionActive, setDetectionActive] = useState(false)
+  const [isMinimized, setIsMinimized] = useState(false)
   const detectionIntervalRef = useRef(null)
+  const faceApiRef = useRef(null)
 
   // Cleanup function to stop camera
   const stopCamera = () => {
@@ -47,27 +48,42 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
   // Enhanced close handler
   const handleClose = () => {
     stopCamera()
+    setIsMinimized(false)
     onClose()
   }
 
-  // Load face-api models from CDN
   useEffect(() => {
-    const loadModels = async () => {
+    const loadFaceAPI = async () => {
       try {
-        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
-        // Load the TinyFaceDetector model
-        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
-        console.log('✓ Face API models loaded successfully')
-        setLoading(false)
+        // Load face-api from CDN
+        const script = document.createElement('script')
+        script.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js'
+        script.async = true
+        script.onload = async () => {
+          console.log('✓ Face API loaded from CDN')
+          // Load models
+          const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
+          if (window.faceapi) {
+            await window.faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+            await window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
+            faceApiRef.current = window.faceapi
+            console.log('✓ Face API models loaded successfully')
+            setLoading(false)
+          }
+        }
+        script.onerror = () => {
+          setError('Failed to load emotion detection models. Please check your internet connection.')
+          setLoading(false)
+        }
+        document.body.appendChild(script)
       } catch (err) {
         console.error('Failed to load models:', err)
-        setError('Failed to load emotion detection models. Please check your internet connection and refresh.')
+        setError('Failed to load emotion detection models.')
         setLoading(false)
       }
     }
 
-    loadModels()
+    loadFaceAPI()
   }, [])
 
   // Initialize webcam
@@ -84,7 +100,6 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           audio: false
         })
 
-        // Store stream reference
         streamRef.current = stream
 
         if (videoRef.current) {
@@ -105,6 +120,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
     // Cleanup when component unmounts or isOpen changes
     return () => {
       stopCamera()
+      setIsMinimized(false)
     }
   }, [isOpen])
 
@@ -123,8 +139,13 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
 
-        const detections = await faceapi
-          .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+        if (!faceApiRef.current) {
+          console.warn('Face API not yet loaded')
+          return
+        }
+
+        const detections = await faceApiRef.current
+          .detectAllFaces(video, new faceApiRef.current.TinyFaceDetectorOptions())
           .withFaceExpressions()
 
         // Clear canvas
@@ -201,21 +222,58 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
     }
   }, [detectionActive, loading, onEmotionDetected])
 
+  // Handle video playback when minimized/expanded
+  useEffect(() => {
+    if (!videoRef.current) return
+    
+    if (!isMinimized && detectionActive) {
+      // When expanded, ensure video is playing and reattach stream if needed
+      setTimeout(() => {
+        if (videoRef.current && streamRef.current) {
+          // Reattach stream in case it was detached
+          if (!videoRef.current.srcObject || videoRef.current.srcObject !== streamRef.current) {
+            videoRef.current.srcObject = streamRef.current
+          }
+          videoRef.current.play().catch(err => {
+            console.warn('Could not play video:', err)
+          })
+        }
+      }, 50)
+    } else if (isMinimized && videoRef.current) {
+      // Pause video when minimizing (don't stop stream)
+      try {
+        videoRef.current.pause()
+      } catch (err) {
+        console.warn('Could not pause video:', err)
+      }
+    }
+  }, [isMinimized, detectionActive])
+
   if (!isOpen) return null
 
   return (
     <div className="emotion-detection-overlay">
-      <div className="emotion-detection-modal">
+      <div className={`emotion-detection-modal ${isMinimized ? 'minimized' : ''}`}>
         <div className="emotion-detection-header">
           <h2>Real-Time Emotion Detection</h2>
-          <button className="close-button" onClick={handleClose}>×</button>
+          <div className="header-buttons">
+            <button 
+              className="minimize-button" 
+              onClick={() => setIsMinimized(!isMinimized)}
+              title={isMinimized ? 'Expand' : 'Collapse'}
+            >
+              {isMinimized ? '▲' : '▼'}
+            </button>
+            <button className="close-button" onClick={handleClose}>×</button>
+          </div>
         </div>
 
-        {error && <div className="emotion-error">{error}</div>}
+        {error && !isMinimized && <div className="emotion-error">{error}</div>}
 
-        {loading && <div className="emotion-loading">Loading emotion detection models...</div>}
+        {loading && !isMinimized && <div className="emotion-loading">Loading emotion detection models...</div>}
 
-        <div className="emotion-detection-container">
+        {/* Video always in DOM, but hidden when minimized */}
+        <div className={`emotion-detection-container ${isMinimized ? 'minimized-content' : ''}`}>
           <div className="video-wrapper">
             <video
               ref={videoRef}
@@ -247,12 +305,11 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           </div>
         </div>
 
-        <div className="emotion-detection-footer">
+        <div className={`emotion-detection-footer ${isMinimized ? 'minimized-content' : ''}`}>
           <button className="emotion-close-btn" onClick={handleClose}>
             Close
           </button>
         </div>
-      </div>
 
       <style jsx>{`
         .emotion-detection-overlay {
@@ -275,6 +332,15 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           max-width: 800px;
           width: 90%;
           overflow: hidden;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+          transition: none;
+        }
+
+        .emotion-detection-modal.minimized {
+          /* Keep modal height when minimized, only hide content */
+          max-height: 60px;
         }
 
         .emotion-detection-header {
@@ -284,35 +350,68 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           padding: 16px 20px;
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           color: white;
+          flex-shrink: 0;
         }
 
         .emotion-detection-header h2 {
           margin: 0;
           font-size: 20px;
+          flex: 1;
+        }
+
+        .header-buttons {
+          display: flex;
+          gap: 8px;
+        }
+
+        .minimize-button {
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          font-size: 16px;
+          cursor: pointer;
+          padding: 6px 10px;
+          border-radius: 4px;
+          transition: background 0.2s;
+        }
+
+        .minimize-button:hover {
+          background: rgba(255, 255, 255, 0.3);
         }
 
         .close-button {
-          background: none;
+          background: rgba(255, 255, 255, 0.2);
           border: none;
           color: white;
-          font-size: 28px;
+          font-size: 24px;
           cursor: pointer;
-          padding: 0;
-          width: 32px;
-          height: 32px;
+          padding: 4px 8px;
+          border-radius: 4px;
+          width: auto;
+          height: auto;
           display: flex;
           align-items: center;
           justify-content: center;
+          transition: background 0.2s;
         }
 
         .close-button:hover {
-          transform: scale(1.1);
+          background: rgba(255, 255, 255, 0.3);
         }
 
         .emotion-detection-container {
           display: flex;
           gap: 20px;
           padding: 20px;
+        }
+
+        .emotion-detection-container.minimized-content {
+          /* Hidden when minimized, but keep in DOM */
+          visibility: hidden;
+          height: 0;
+          padding: 0;
+          gap: 0;
+          overflow: hidden;
         }
 
         .video-wrapper {
@@ -322,12 +421,18 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           overflow: hidden;
           border-radius: 8px;
           background: #000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 300px;
         }
 
         .emotion-video {
           width: 100%;
           height: 100%;
           object-fit: cover;
+          display: block;
+          background: #000;
         }
 
         .emotion-canvas {
@@ -411,6 +516,15 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           gap: 10px;
         }
 
+        .emotion-detection-footer.minimized-content {
+          /* Hide but keep in DOM */
+          visibility: hidden;
+          height: 0;
+          padding: 0;
+          border: none;
+          gap: 0;
+        }
+
         .emotion-close-btn {
           background: #667eea;
           color: white;
@@ -440,6 +554,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           }
         }
       `}</style>
+      </div>
     </div>
   )
 }

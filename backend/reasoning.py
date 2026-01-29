@@ -57,7 +57,9 @@ class CognitiveReasoningEngine:
     async def process_message(self, user_message: str, user_id: str = "default",
                         stm_memories: Optional[List[Dict[str, Any]]] = None,
                         ltm_memories: Optional[List[Dict[str, Any]]] = None,
-                        pdf_snippets: Optional[List[str]] = None) -> Dict[str, Any]:
+                        pdf_snippets: Optional[List[str]] = None,
+                        conversation_id: str = None,
+                        current_emotion: str = "neutral") -> Dict[str, Any]:
         """
         Process a user message through the cognitive loop.
 
@@ -72,7 +74,7 @@ class CognitiveReasoningEngine:
 
         try:
             
-            processed_input = self._process_input(user_message, user_id)
+            processed_input = self._process_input(user_message, user_id, current_emotion)
 
             
             recalled_info = {
@@ -119,14 +121,15 @@ class CognitiveReasoningEngine:
                 "metadata": {"error": True}
             }
 
-    def _process_input(self, user_message: str, user_id: str) -> Dict[str, Any]:
+    def _process_input(self, user_message: str, user_id: str, current_emotion: str = "neutral") -> Dict[str, Any]:
         """Process and analyze the user input."""
         return {
             "original_message": user_message,
             "message_length": len(user_message),
             "user_id": user_id,
             "timestamp": time.time(),
-            "message_type": self._classify_message_type(user_message)
+            "message_type": self._classify_message_type(user_message),
+            "current_emotion": current_emotion
         }
 
     def _classify_message_type(self, message: str) -> str:
@@ -161,7 +164,8 @@ class CognitiveReasoningEngine:
             "context_to_use": self._select_relevant_context(recalled_info),
             "response_style": "informative",
             "include_sources": bool(recalled_info.get("pdf_knowledge")),
-            "memory_updates_needed": self._determine_memory_updates(processed_input, recalled_info)
+            "memory_updates_needed": self._determine_memory_updates(processed_input, recalled_info),
+            "user_emotion": processed_input.get("current_emotion", "neutral")
         }
 
         return plan
@@ -271,6 +275,10 @@ class CognitiveReasoningEngine:
         context = response_plan.get("context_to_use", {})
 
         
+        # Inject emotion into context for prompt builder
+        if response_plan.get("user_emotion"):
+            context["user_emotion"] = response_plan.get("user_emotion")
+
         system_prompt = self._build_system_prompt(strategy, context)
         user_prompt = self._build_user_prompt(response_plan, processed_input, recalled_info)
 
@@ -404,10 +412,9 @@ class CognitiveReasoningEngine:
                     return
 
     def _build_system_prompt(self, strategy: str, context: Dict[str, Any]) -> str:
-        """Build the system prompt based on response strategy."""
-        
-        # Professional Therapist System Prompt
-        base_prompt = """You are a compassionate, professional therapist providing emotional support and mental health guidance. Your role is to help users explore their feelings, develop coping strategies, and work through challenges in a safe, non-judgmental environment.
+    """Build the system prompt based on response strategy."""
+
+    base_prompt = """You are a compassionate, professional therapist providing emotional support and mental health guidance. Your role is to help users explore their feelings, develop coping strategies, and work through challenges in a safe, non-judgmental environment.
 
 CORE THERAPEUTIC PRINCIPLES:
 1. Active Listening & Empathy: Acknowledge and validate the user's feelings and experiences
@@ -426,68 +433,61 @@ COMMUNICATION STYLE:
 
 CRITICAL - RESPONSE FORMAT:
 - Write in PLAIN, NATURAL LANGUAGE ONLY
-- DO NOT use markdown formatting (no **, *, ###, `, etc.)
-- DO NOT include citations, references, or numbered sources
-- DO NOT use hashtags or special characters for emphasis
-- DO NOT use asterisks for actions or emphasis
+- DO NOT use markdown formatting
+- DO NOT include citations or references
+- DO NOT use special characters for emphasis
 - Write as if you're speaking directly to the person in a therapy session
-- Use natural emphasis through word choice, not formatting
 
 ETHICAL BOUNDARIES & SAFETY:
-1. Crisis Situations: If user mentions suicide, self-harm, or harming others:
-   - Take it seriously and express concern
-   - Encourage them to contact emergency services (988 Suicide & Crisis Lifeline in US, or local emergency number)
-   - Suggest reaching out to a trusted person immediately
-   - Remind them that professional crisis counselors are available 24/7
-
-2. Limitations of AI Therapy:
-   - You are a supportive tool, not a replacement for licensed mental health professionals
-   - For serious mental health conditions, medication needs, or ongoing therapy, encourage seeking professional help
-   - You cannot diagnose mental health conditions
-   - You cannot prescribe medication or treatment plans
-
-3. Scope of Practice:
-   - Focus on emotional support, coping strategies, and general mental wellness
-   - Help users explore their thoughts and feelings
-   - Provide evidence-based coping techniques (breathing exercises, grounding, cognitive reframing)
-   - Encourage healthy habits and self-care
+- You are a supportive tool, not a replacement for licensed professionals
+- You cannot diagnose or prescribe
+- Encourage professional help when appropriate
 
 THERAPEUTIC TECHNIQUES TO USE:
-- Reflective listening: "It sounds like you're feeling..."
-- Validation: "That must be really difficult" or "Your feelings are completely valid"
-- Open-ended questions: "Can you tell me more about that?" or "How did that make you feel?"
-- Cognitive reframing: Help users see situations from different perspectives
-- Coping strategies: Suggest practical techniques when appropriate
-- Normalization: "Many people experience..." (when appropriate)
-- Empowerment: Help users recognize their agency and choices
+- Reflective listening
+- Validation
+- Open-ended questions
+- Cognitive reframing
+- Practical coping strategies
+- Empowerment
 
 REMEMBER:
-- Every person's experience is unique and valid
-- Small steps forward are still progress
 - Healing is not linear
-- You're here to support, not to fix
-- The user is the expert on their own life"""
+- Small steps matter
+- The user is the expert on their own life
+- You are here to support, not to fix
+"""
 
-        # Add context-specific guidance
-        knowledge_snippets = context.get("knowledge_snippets", [])
-        has_pdf_knowledge = knowledge_snippets and len(knowledge_snippets) > 0
-        
-        if has_pdf_knowledge:
-            # If there's document knowledge, incorporate it naturally
-            knowledge_text = "\n---\n".join(context["knowledge_snippets"])
-            base_prompt += f"""
+    # --- Knowledge Snippets (PDF / RAG Context) ---
+    knowledge_snippets = context.get("knowledge_snippets", [])
+    if knowledge_snippets:
+        knowledge_text = "\n---\n".join(knowledge_snippets)
+        base_prompt += f"""
 
-AVAILABLE KNOWLEDGE:
-You have access to the following information that may be relevant to the conversation:
+You have access to the following background information that may be relevant to the conversation.
+When it is helpful, integrate this knowledge naturally into your responses, without citing sources or referencing documents.
+
 {knowledge_text}
+"""
 
-When this information is relevant, incorporate it naturally into your therapeutic responses. Do not cite sources or use references - simply weave the information into your guidance as a knowledgeable therapist would."""
-        
-        # Add user preferences if available
-        if context.get("user_preferences"):
-            base_prompt += f"\n\nUser Context: {context['user_preferences']}"
-        
-        return base_prompt
+    # --- User Emotional State Context ---
+    user_emotion = context.get("user_emotion", "neutral")
+    if user_emotion and user_emotion != "neutral":
+        base_prompt += f"""
+
+The user currently appears to be feeling {user_emotion}.
+Let this awareness subtly guide your tone, empathy, and emotional validation, without explicitly labeling or announcing the emotion.
+"""
+
+    # --- User Preferences / Personal Context ---
+    if context.get("user_preferences"):
+        base_prompt += f"""
+
+Additional user context to keep in mind while responding:
+{context['user_preferences']}
+"""
+
+    return base_prompt
 
     def _build_user_prompt(self, response_plan: Dict[str, Any], processed_input: Dict[str, Any], recalled_info: Dict[str, Any]) -> str:
         """Build the user prompt for the LLM using the real user message and selected context."""

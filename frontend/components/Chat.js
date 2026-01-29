@@ -27,6 +27,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   const [detectedEmotion, setDetectedEmotion] = useState(null)
 
   const inputRef = useRef(null)
+  const fileInputRef = useRef(null)
   const messagesRef = useRef(null)
   const wsRef = useRef(null)
   const mediaRecorderRef = useRef(null)
@@ -61,9 +62,19 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
     pushMessage('user', displayedMessage, { file: fileInfo })
     setText('')
+    setAttachingFile(null)
+    setFileInfo(null)
+    setUploadProgress(0)
 
     // Prepare payload for backend — include conversation_id and doc_id
-    const payload = { message: displayedMessage }
+    // Attach dominant emotion context if available, otherwise default to neutral
+    const emotionContext = detectedEmotion?.dominantEmotion || 'neutral';
+    console.log('[send] Attaching emotion context:', emotionContext);
+
+    const payload = {
+      message: displayedMessage,
+      emotion: emotionContext
+    }
 
     // Pass conversation_id if not a temporary chat
     const currentChat = chats.find(c => c.id === currentChatId)
@@ -84,15 +95,21 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     // Helper function to update only the chat containing our specific message
     // This prevents updates from affecting other chats even if IDs match
     const updateMessageInChat = (updateFn) => {
-      updateChats(prev => prev.map(c => {
-        // Find the chat that contains our message
-        const hasMessage = c.messages.some(m => m.id === aiMessageId)
-        if (hasMessage) {
-          console.log(`[updateMessageInChat] Updating message ${aiMessageId} in chat ${c.id}`)
-          return updateFn(c)
-        }
-        return c
-      }))
+      // Functional state update to ensure we always have latest state
+      updateChats(prev => {
+        return prev.map(c => {
+          // Find the chat that contains our message
+          const messageIndex = c.messages.findIndex(m => m.id === aiMessageId);
+          if (messageIndex !== -1) {
+            // Create a deep copy of the chat to avoid mutation
+            const updatedChat = { ...c, messages: [...c.messages] };
+            // Apply the update function specifically to this chat
+            const result = updateFn(updatedChat);
+            return result;
+          }
+          return c;
+        });
+      });
     }
 
     // Call backend streaming chat endpoint
@@ -138,8 +155,11 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
               const data = JSON.parse(line.slice(6))
 
               if (data.type === 'chunk') {
-                // Append chunk to message - update only the chat containing this message
-                fullResponse += data.content
+                // Append chunk to message
+                const chunk = data.content || '';
+                fullResponse += chunk; // Update local accumulator
+
+                // Functional update to append to existing message content in state
                 updateMessageInChat(c => ({
                   ...c,
                   messages: c.messages.map(m =>
@@ -152,12 +172,30 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
                   console.log('[send] Backend created new conversation:', data.conversation_id)
                   const newConversationId = data.conversation_id
 
-                  // Update the chat ID and mark as not temp - only for the chat with our message
+                  // Infer title from the first user message (which is likely the one we just sent)
+                  // Use the helper variable 'displayedMessage' from above via closure or re-find it from chats
+                  const currentChatObj = chats.find(c => c.id === currentChatId);
+                  const firstUserMsg = currentChatObj?.messages.find(m => m.role === 'user')?.content || displayedMessage;
+
+                  // Simple frontend truncation for immediate feedback
+                  let newTitle = 'New Chat';
+                  if (firstUserMsg) {
+                    newTitle = firstUserMsg.substring(0, 30);
+                    if (firstUserMsg.length > 30) newTitle += '...';
+                  }
+
+                  // Update the chat ID, TITLE, and mark as not temp
                   updateChats(prev => prev.map(c => {
                     const hasMessage = c.messages.some(m => m.id === aiMessageId)
                     if (hasMessage) {
-                      console.log(`[send] Updating chat ID from ${c.id} to ${newConversationId}`)
-                      return { ...c, id: newConversationId, isTemp: false }
+                      console.log(`[send] Updating chat properties: ${newConversationId}, ${newTitle}`)
+                      return {
+                        ...c,
+                        id: newConversationId,
+                        title: newTitle, // Optimistic title update
+                        isTemp: false,
+                        messagesLoaded: true // Ensure we don't try to re-fetch immediately and lose state
+                      }
                     }
                     return c
                   }))
@@ -178,11 +216,11 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
                 // Trigger message reload from backend to sync state
                 if (onStreamComplete && data.conversation_id) {
-                  console.log('[send] Triggering message reload after streaming complete')
-                  // Small delay to ensure backend has finished writing
+                  console.log('[send] Triggering message reload after streaming complete (delayed by 60s)')
+                  // Delayed refresh to ensure user can read the message before any potential update flicker
                   setTimeout(() => {
-                    onStreamComplete(data.conversation_id)
-                  }, 100)
+                    onStreamComplete(data.conversation_id, fullResponse)
+                  }, 60000)
                 }
               } else if (data.type === 'error') {
                 updateMessageInChat(c => ({
@@ -222,18 +260,28 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       xhr.setRequestHeader('Authorization', `Bearer ${token}`)
       console.log('[uploadFileWithProgress] XHR opened')
 
+      let progressStarted = false
+      const progressTimeout = setTimeout(() => {
+        if (!progressStarted) {
+          console.log('[uploadFileWithProgress] No progress events, using fallback')
+          onProgress(50) // Show 50% while uploading if no events
+        }
+      }, 500)
+
       xhr.upload.onprogress = function (e) {
+        progressStarted = true
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 100)
           console.log('[xhr.progress]', pct + '%')
           onProgress(pct)
         } else {
           console.log('[xhr.progress] indeterminate')
-          onProgress(5)
+          onProgress(50)
         }
       }
 
       xhr.onload = function () {
+        clearTimeout(progressTimeout)
         console.log('[xhr.onload]', xhr.status, xhr.responseText.substring(0, 100))
         if (xhr.status >= 200 && xhr.status < 300) {
           try { onProgress(100) } catch (e) { }
@@ -244,6 +292,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       }
 
       xhr.onerror = function () {
+        clearTimeout(progressTimeout)
         console.error('[xhr.onerror]')
         reject(new Error('Network error during upload'))
       }
@@ -267,14 +316,17 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
             uploadStatus: j.status || 'processing',
             doc_id: j.doc_id || null
           })
+          // Keep the progress at 100% so the bar stays visible and green/complete
+          setUploadProgress(100)
         })
         .catch(err => {
           const msg = err && err.message ? err.message : String(err)
           console.error('[onFileChange] upload failed:', msg)
           setError('Upload failed: ' + msg)
+          setUploadProgress(0)
         })
         .finally(() => {
-          setUploadProgress(0)
+          // Do not reset progress here so UI shows 100% completion
         })
     }
   }
@@ -319,28 +371,37 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data)
-          console.log('[Voice] Received:', data.type)
+          console.log('[Voice] Received from backend:', { type: data.type, hasText: !!data.text })
 
           if (data.type === 'transcript') {
+            console.log('[Voice] Transcript received:', data.text)
             setVoiceTranscript(data.text)
             // Add user message to chat
             pushMessage('user', data.text)
+            // Clear transcript display after showing it
+            setTimeout(() => setVoiceTranscript(''), 2000)
           } else if (data.type === 'audio') {
+            console.log('[Voice] Audio response received, queuing for playback')
             // Queue audio for playback
             const audioData = Uint8Array.from(atob(data.data), c => c.charCodeAt(0))
-            audioQueueRef.current.push(audioData)
-            playNextAudio()
+            audioQueueRef.current.push({ buffer: audioData.buffer })
+            if (!isPlayingRef.current) {
+              playNextAudio()
+            }
           } else if (data.type === 'status') {
+            console.log('[Voice] Status update:', data.state, data.message)
             setVoiceState(data.state)
           } else if (data.type === 'response') {
+            console.log('[Voice] LLM response received:', data.text)
             // Add AI response to chat
             pushMessage('ai', data.text)
           } else if (data.type === 'error') {
+            console.error('[Voice] Backend error:', data.message)
             setError('Voice error: ' + data.message)
             setVoiceState('idle')
           }
         } catch (e) {
-          console.error('[Voice] Failed to parse message:', e)
+          console.error('[Voice] Failed to parse message:', e, 'Raw data:', event.data)
         }
       }
 
@@ -407,12 +468,23 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
           const reader = new FileReader()
           reader.onloadend = () => {
             const base64 = reader.result.split(',')[1]
+            console.log(`[Voice] Sending audio chunk: ${base64.length} bytes`)
             ws.send(JSON.stringify({
               type: 'audio',
               data: base64
             }))
           }
           reader.readAsDataURL(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        console.log('[Voice] Recording stopped, sending stop signal to backend')
+        // Send stop signal to backend to process remaining audio
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'stop'
+          }))
         }
       }
 
@@ -521,7 +593,8 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     isPlayingRef.current = true
     setVoiceState('speaking')
 
-    const audioData = audioQueueRef.current.shift()
+    const audioItem = audioQueueRef.current.shift()
+    const audioData = audioItem.buffer || audioItem
 
     try {
       // Initialize audio context if needed
@@ -530,20 +603,25 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       }
 
       const audioContext = audioContextRef.current
-      const audioBuffer = await audioContext.decodeAudioData(audioData.buffer)
+      console.log('[Voice] Decoding audio data, buffer size:', audioData.byteLength)
+
+      const audioBuffer = await audioContext.decodeAudioData(audioData)
       const source = audioContext.createBufferSource()
       source.buffer = audioBuffer
       source.connect(audioContext.destination)
 
       source.onended = () => {
+        console.log('[Voice] Audio playback finished')
         isPlayingRef.current = false
         if (audioQueueRef.current.length > 0) {
           playNextAudio()
         } else {
+          console.log('[Voice] No more audio, returning to idle')
           setVoiceState('idle')
         }
       }
 
+      console.log('[Voice] Starting audio playback')
       source.start(0)
     } catch (err) {
       console.error('[Voice] Audio playback error:', err)
@@ -619,7 +697,14 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
               </div>
               <div className="attachment-name">{attachingFile.name}</div>
               <div style={{ flex: 1 }} />
-              <button className="btn small" onClick={() => { setAttachingFile(null); setUploadProgress(0); setFileInfo(null) }}>Remove</button>
+              <button className="btn small" onClick={() => {
+                setAttachingFile(null);
+                setUploadProgress(0);
+                setFileInfo(null);
+                setFileInfo(null);
+                // Clear the file input value so selecting the same file again works
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}>Remove</button>
             </div>
           )}
 
@@ -629,7 +714,13 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
-              <input type="file" accept="application/pdf" onChange={onFileChange} style={{ display: 'none' }} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={onFileChange}
+                style={{ display: 'none' }}
+              />
             </label>
 
             {/* Text Input */}
@@ -706,8 +797,46 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
         isOpen={showEmotionDetection}
         onClose={() => setShowEmotionDetection(false)}
         onEmotionDetected={(emotionData) => {
-          setDetectedEmotion(emotionData)
-          console.log('Detected emotion:', emotionData)
+          // Rolling window aggregation: keep predictions from last 2 seconds
+          const now = Date.now();
+          const validWindow = 2000;
+
+          setDetectedEmotion(prev => {
+            // If we have no history or it's a fresh start
+            let history = prev?.history || [];
+
+            // Append new prediction
+            history.push({
+              timestamp: now,
+              emotion: emotionData.emotion,
+              confidence: emotionData.confidence
+            });
+
+            // Filter out old predictions
+            history = history.filter(item => now - item.timestamp < validWindow);
+
+            // Compute dominant emotion in window
+            const counts = {};
+            history.forEach(item => {
+              counts[item.emotion] = (counts[item.emotion] || 0) + 1;
+            });
+
+            let dominant = 'neutral';
+            let maxCount = 0;
+            for (const [em, count] of Object.entries(counts)) {
+              if (count > maxCount) {
+                maxCount = count;
+                dominant = em;
+              }
+            }
+
+            // Return updated state structure
+            return {
+              current: emotionData,
+              history: history,
+              dominantEmotion: dominant
+            };
+          });
         }}
       />
     </main>

@@ -303,21 +303,27 @@ class VoiceWebSocketHandler:
             # Extract audio data
             audio_data_b64 = message.get('data')
             if not audio_data_b64:
+                logger.warning("No audio data provided in message")
                 await session.send_error("No audio data provided")
                 return
             
             # Decode audio
             audio_bytes = session.audio_processor.base64_to_bytes(audio_data_b64)
+            logger.debug(f"Received audio chunk: {len(audio_bytes)} bytes from {session.user_id}")
             
             # Add to buffer (don't process automatically)
             session.audio_buffer.add(audio_bytes)
+            buffer_duration = session.audio_buffer.get_duration()
+            buffer_chunks = session.audio_buffer.get_chunk_count()
+            logger.debug(f"Buffer: {buffer_chunks} chunks, {buffer_duration:.2f}s duration")
             
-            # Only warn if buffer is getting too full (but don't auto-process)
-            if session.audio_buffer.is_full():
-                logger.warning(f"Audio buffer is full ({session.audio_buffer.get_duration():.1f}s), waiting for stop signal")
+            # Check if buffer is ready for processing
+            if session.audio_buffer.is_ready() or session.audio_buffer.is_full():
+                logger.info(f"Buffer ready for processing (ready={session.audio_buffer.is_ready()}, full={session.audio_buffer.is_full()})")
+                await self._process_audio_buffer(session)
         
         except Exception as e:
-            logger.error(f"Error handling audio: {e}")
+            logger.error(f"Error handling audio: {e}", exc_info=True)
             await session.send_error(f"Audio processing error: {str(e)}")
     
     async def _process_audio_buffer(self, session: VoiceSession):
@@ -333,26 +339,32 @@ class VoiceWebSocketHandler:
             
             # Get combined audio from buffer
             audio_bytes = session.audio_buffer.get_audio()
+            logger.info(f"Processing {len(audio_bytes)} bytes of audio from {session.user_id}")
             
             # Validate audio
             if not session.audio_validator.is_valid_audio(audio_bytes, min_duration=0.5):
-                logger.warning("Invalid or too short audio, skipping")
+                logger.warning(f"Invalid or too short audio ({len(audio_bytes)} bytes), skipping")
                 session.audio_buffer.clear()
                 await session.send_status("idle", "Audio too short, please speak longer")
                 return
             
             # Convert to WAV and resample to 16kHz (Whisper requirement)
             try:
+                logger.info("Resampling audio to 16kHz")
                 audio_bytes = session.audio_processor.resample_audio(audio_bytes, target_sample_rate=16000)
+                logger.info(f"Resampled audio: {len(audio_bytes)} bytes")
             except Exception as e:
                 logger.warning(f"Audio conversion failed, using original: {e}")
             
             # Step 1: Speech-to-Text
+            logger.info("Loading STT model...")
             stt_model = ModelManager.get_stt_model()
             if not stt_model:
+                logger.error("STT model is None - voice functionality unavailable")
                 await session.send_error("STT model not available")
                 return
             
+            logger.info("Transcribing audio...")
             transcript_result = await stt_model.transcribe(audio_bytes)
             transcript_text = transcript_result.get('text', '').strip()
             
@@ -362,18 +374,19 @@ class VoiceWebSocketHandler:
                 await session.send_status("idle", "No speech detected")
                 return
             
+            logger.info(f"✓ Transcribed: {transcript_text}")
+            
             # Send transcript to client
             await session.send_transcript(
                 transcript_text,
                 transcript_result.get('language', 'en')
             )
             
-            logger.info(f"Transcribed: {transcript_text}")
-            
             # Clear buffer after successful transcription
             session.audio_buffer.clear()
             
             # Step 2: Process through LLM
+            logger.info("Processing through LLM...")
             await session.send_status("processing", "Generating response")
             
             response_text = await self._process_with_llm(
@@ -382,27 +395,42 @@ class VoiceWebSocketHandler:
             )
             
             if not response_text:
+                logger.error("LLM returned empty response")
                 await session.send_error("Failed to generate response")
                 return
             
-            # Step 3: Text-to-Speech
+            logger.info(f"✓ LLM Response: {response_text}")
+            
+            # Send response to client
+            try:
+                await session.websocket.send_json({
+                    'type': 'response',
+                    'text': response_text
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send response: {e}")
+            
+            # Step 3: Text-to-Speech (optional)
+            logger.info("Synthesizing response audio...")
             await session.send_status("speaking", "Synthesizing speech")
             
             tts_model = ModelManager.get_tts_model()
             if not tts_model:
-                await session.send_error("TTS model not available")
+                logger.warning("TTS model not available, skipping audio synthesis")
+                await session.send_status("idle", "Ready for next message")
                 return
             
             audio_response = await tts_model.synthesize(response_text)
             
             # Send audio to client
+            logger.info(f"Sending audio response ({len(audio_response)} bytes)...")
             await session.send_audio(audio_response)
             
             # Back to idle
             await session.send_status("idle", "Ready for next message")
         
         except Exception as e:
-            logger.error(f"Error processing audio buffer: {e}")
+            logger.error(f"Error processing audio buffer: {e}", exc_info=True)
             await session.send_error(f"Processing error: {str(e)}")
             session.audio_buffer.clear()
             await session.send_status("idle", "Ready")
@@ -568,15 +596,20 @@ class VoiceWebSocketHandler:
         Args:
             session: Voice session
         """
-        logger.info(f"[Voice] Received stop signal, processing {session.audio_buffer.get_chunk_count()} audio chunks ({session.audio_buffer.get_duration():.1f}s)")
+        logger.info(f"Stop signal received from {session.user_id}")
         
-        # Process the accumulated audio buffer
-        if session.audio_buffer.get_chunk_count() > 0:
+        # Check buffer status
+        chunk_count = session.audio_buffer.get_chunk_count()
+        buffer_duration = session.audio_buffer.get_duration()
+        logger.info(f"Buffer status: {chunk_count} chunks, {buffer_duration:.2f}s duration")
+        
+        # Process any remaining audio in buffer
+        if chunk_count > 0:
+            logger.info(f"Processing buffered audio on stop signal ({buffer_duration:.2f}s)")
             await self._process_audio_buffer(session)
         else:
-            logger.warning("[Voice] No audio chunks to process")
-            await session.send_status("idle", "No audio recorded")
-
+            logger.info("Buffer empty, no audio to process")
+            await session.send_status("idle", "Ready")
     
     def get_active_sessions(self) -> list:
         """Get list of active session IDs."""
