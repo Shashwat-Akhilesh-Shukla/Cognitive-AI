@@ -57,7 +57,9 @@ class CognitiveReasoningEngine:
     async def process_message(self, user_message: str, user_id: str = "default",
                         stm_memories: Optional[List[Dict[str, Any]]] = None,
                         ltm_memories: Optional[List[Dict[str, Any]]] = None,
-                        pdf_snippets: Optional[List[str]] = None) -> Dict[str, Any]:
+                        pdf_snippets: Optional[List[str]] = None,
+                        conversation_id: str = None,
+                        current_emotion: str = "neutral") -> Dict[str, Any]:
         """
         Process a user message through the cognitive loop.
 
@@ -72,7 +74,7 @@ class CognitiveReasoningEngine:
 
         try:
             
-            processed_input = self._process_input(user_message, user_id)
+            processed_input = self._process_input(user_message, user_id, current_emotion)
 
             
             recalled_info = {
@@ -119,14 +121,15 @@ class CognitiveReasoningEngine:
                 "metadata": {"error": True}
             }
 
-    def _process_input(self, user_message: str, user_id: str) -> Dict[str, Any]:
+    def _process_input(self, user_message: str, user_id: str, current_emotion: str = "neutral") -> Dict[str, Any]:
         """Process and analyze the user input."""
         return {
             "original_message": user_message,
             "message_length": len(user_message),
             "user_id": user_id,
             "timestamp": time.time(),
-            "message_type": self._classify_message_type(user_message)
+            "message_type": self._classify_message_type(user_message),
+            "current_emotion": current_emotion
         }
 
     def _classify_message_type(self, message: str) -> str:
@@ -161,7 +164,8 @@ class CognitiveReasoningEngine:
             "context_to_use": self._select_relevant_context(recalled_info),
             "response_style": "informative",
             "include_sources": bool(recalled_info.get("pdf_knowledge")),
-            "memory_updates_needed": self._determine_memory_updates(processed_input, recalled_info)
+            "memory_updates_needed": self._determine_memory_updates(processed_input, recalled_info),
+            "user_emotion": processed_input.get("current_emotion", "neutral")
         }
 
         return plan
@@ -271,6 +275,10 @@ class CognitiveReasoningEngine:
         context = response_plan.get("context_to_use", {})
 
         
+        # Inject emotion into context for prompt builder
+        if response_plan.get("user_emotion"):
+            context["user_emotion"] = response_plan.get("user_emotion")
+
         system_prompt = self._build_system_prompt(strategy, context)
         user_prompt = self._build_user_prompt(response_plan, processed_input, recalled_info)
 
@@ -428,6 +436,11 @@ class CognitiveReasoningEngine:
         if has_pdf_knowledge:
             knowledge_text = "\n---\n".join(context["knowledge_snippets"])
             base_prompt = f"{base_prompt}\n\n[DOCUMENT KNOWLEDGE]\n{knowledge_text}\n[END DOCUMENT KNOWLEDGE]\n\nWhen answering, cite specific passages from the documents above when applicable."
+
+        # Add User Emotion Context
+        user_emotion = context.get("user_emotion", "neutral")
+        if user_emotion and user_emotion != "neutral":
+             base_prompt += f"\n\n[USER EMOTIONAL STATE]: {user_emotion}\nThe user currently appears to be feeling {user_emotion}. Acknowledge this emotion subtly in your response tone."
 
         return base_prompt
 

@@ -21,7 +21,14 @@ import logging
 from dotenv import load_dotenv
 import time
 
-load_dotenv("backend/.env")
+# Robust .env loading
+env_path = Path(__file__).parent / ".env"
+if not env_path.exists():
+    print(f"Creating missing .env file at: {env_path}")
+    env_path.touch()
+
+print(f"Loading env from: {env_path}")
+load_dotenv(env_path)
 
 from backend.memory.stm import STMManager
 from backend.memory.ltm import LTMManager
@@ -108,6 +115,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     doc_id: Optional[str] = None
+    emotion: Optional[str] = "neutral"
 
 
 class ChatResponse(BaseModel):
@@ -886,7 +894,7 @@ async def chat_stream(
                 pdf_snippets = []
 
             # Process input and plan response
-            processed_input = reasoning_engine._process_input(request.message, user_id)
+            processed_input = reasoning_engine._process_input(request.message, user_id, request.emotion)
             recalled_info = {
                 "stm_memories": stm_list,
                 "ltm_memories": ltm_list,
@@ -963,7 +971,9 @@ async def chat_stream(
                     db.add_message(conversation_id, user_id, "user", request.message, timestamp, metadata={"doc_id": request.doc_id})
                     db.add_message(conversation_id, user_id, "assistant", full_response, timestamp + 0.001, metadata={"reasoning": response_plan})
             except Exception as e:
-                logger.warning(f"Failed to store messages in SQL for user {user_id}: {e}")
+                logger.error(f"CRITICAL: Failed to store messages in SQL for user {user_id}: {e}", exc_info=True)
+                # We attempt to yield an error event so frontend knows persistence failed (optional)
+                # yield f"data: {json.dumps({'type': 'error', 'message': 'Message persistence failed'})}\n\n"
 
             # Send final metadata event
             yield f"data: {json.dumps({'type': 'done', 'conversation_id': conversation_id})}\n\n"

@@ -94,7 +94,9 @@ export default function Home() {
   }, [token])
 
   // Load messages for a conversation
-  const loadMessages = async (conversationId) => {
+  // optionalLatestContent: content of the latest AI message if we just finished streaming it
+  // This helps prevent 'flicker' or data loss if the backend isn't perfectly in sync yet
+  const loadMessages = async (conversationId, optionalLatestContent) => {
     // Don't load for temporary conversations
     const chat = chats.find(c => c.id === conversationId)
     if (chat && chat.isTemp) return
@@ -113,20 +115,61 @@ export default function Home() {
       const data = await res.json()
 
       // Update chat with messages and mark as loaded
-      setChats(prev => prev.map(c =>
-        c.id === conversationId
-          ? {
-            ...c,
-            messages: data.messages.map(m => ({
-              id: m.message_id,
-              role: m.role,
-              content: m.content,
-              timestamp: m.timestamp
-            })),
-            messagesLoaded: true
+      setChats(prev => prev.map(c => {
+        if (c.id !== conversationId) return c; // Only update the target chat
+
+        let newMessages = data.messages.map(m => ({
+          id: m.message_id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp
+        }));
+
+        // CRITICAL FIX: If we just finished streaming a message, ensure it exists in the fetched list.
+        // If the backend has not indexed it yet (race condition), we manually append/update it
+        // using the content we have locally (optionalLatestContent).
+        if (optionalLatestContent) {
+          // Check if the last message from backend matches what we just streamed.
+          // Usually the last AI message.
+          const lastMsg = newMessages[newMessages.length - 1];
+          const isMissing = !lastMsg || lastMsg.role !== 'ai' || lastMsg.content !== optionalLatestContent;
+
+          if (isMissing) {
+            console.log('[loadMessages] Backend missing latest message. Backend count:', newMessages.length);
+
+            if (newMessages.length === 0 && c.messages && c.messages.length > 0) {
+              console.warn('[loadMessages] Backend returned 0 messages but we have local history. Preserving local history.');
+              // Merge local history with latest content
+              newMessages = [...c.messages];
+              const localLast = newMessages[newMessages.length - 1];
+              if (localLast.role === 'ai') {
+                localLast.content = optionalLatestContent;
+                localLast.streaming = false;
+              } else {
+                newMessages.push({
+                  id: 'ai-local-preserved-' + Date.now(),
+                  role: 'ai',
+                  content: optionalLatestContent,
+                  timestamp: Date.now() / 1000
+                });
+              }
+            } else {
+              newMessages.push({
+                id: 'ai-local-fallback-' + Date.now(),
+                role: 'ai',
+                content: optionalLatestContent,
+                timestamp: Date.now() / 1000
+              });
+            }
           }
-          : c
-      ))
+        }
+
+        return {
+          ...c,
+          messages: newMessages,
+          messagesLoaded: true
+        };
+      }))
     } catch (error) {
       console.error('Error loading messages:', error)
     }
