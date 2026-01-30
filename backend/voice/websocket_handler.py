@@ -311,16 +311,14 @@ class VoiceWebSocketHandler:
             audio_bytes = session.audio_processor.base64_to_bytes(audio_data_b64)
             logger.debug(f"Received audio chunk: {len(audio_bytes)} bytes from {session.user_id}")
             
-            # Add to buffer (don't process automatically)
+            # Add to buffer (don't process automatically - only process on explicit stop signal)
             session.audio_buffer.add(audio_bytes)
             buffer_duration = session.audio_buffer.get_duration()
             buffer_chunks = session.audio_buffer.get_chunk_count()
             logger.debug(f"Buffer: {buffer_chunks} chunks, {buffer_duration:.2f}s duration")
             
-            # Check if buffer is ready for processing
-            if session.audio_buffer.is_ready() or session.audio_buffer.is_full():
-                logger.info(f"Buffer ready for processing (ready={session.audio_buffer.is_ready()}, full={session.audio_buffer.is_full()})")
-                await self._process_audio_buffer(session)
+            # Don't auto-process - wait for explicit stop signal from user
+            # This allows users to record for as long as they want without interruption
         
         except Exception as e:
             logger.error(f"Error handling audio: {e}", exc_info=True)

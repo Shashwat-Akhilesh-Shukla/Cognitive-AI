@@ -3,7 +3,6 @@ Text-to-Speech (TTS) using Coqui TTS
 
 Implements local TTS synthesis with caching and optimization.
 """
-
 import os
 import io
 import logging

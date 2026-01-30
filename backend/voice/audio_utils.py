@@ -205,8 +205,12 @@ class AudioBuffer:
         """
         Get combined audio from all chunks.
         
+        For streaming audio (like WebM from MediaRecorder), individual chunks
+        are NOT valid standalone files. We must concatenate raw bytes first,
+        then decode the complete stream.
+        
         Returns:
-            bytes: Combined audio data
+            bytes: Combined audio data in WAV format
         """
         if not self.chunks:
             return b''
@@ -214,26 +218,33 @@ class AudioBuffer:
         try:
             from pydub import AudioSegment
             
-            # Combine all chunks
-            combined = AudioSegment.empty()
-            for chunk in self.chunks:
-                try:
-                    audio = AudioSegment.from_file(io.BytesIO(chunk))
-                    combined += audio
-                except Exception as e:
-                    logger.warning(f"Failed to process audio chunk: {e}")
-                    continue
+            # CRITICAL: For WebM/streaming formats, concatenate raw bytes FIRST
+            # Individual chunks are not valid standalone audio files
+            combined_bytes = b''.join(self.chunks)
+            logger.info(f"Concatenated {len(self.chunks)} chunks into {len(combined_bytes)} bytes")
             
-            # Export combined audio
+            # Now decode the complete audio stream
+            try:
+                audio = AudioSegment.from_file(
+                    io.BytesIO(combined_bytes),
+                    format="webm"  # Explicitly specify WebM format
+                )
+                logger.info(f"Successfully decoded WebM audio: {len(audio)}ms, {audio.frame_rate}Hz")
+            except Exception as webm_error:
+                logger.warning(f"Failed to decode as WebM, trying auto-detect: {webm_error}")
+                # Fallback: let pydub auto-detect format
+                audio = AudioSegment.from_file(io.BytesIO(combined_bytes))
+            
+            # Export as WAV
             output_io = io.BytesIO()
-            combined.export(output_io, format="wav")
+            audio.export(output_io, format="wav")
             output_io.seek(0)
             
             return output_io.read()
             
         except Exception as e:
             logger.error(f"Failed to combine audio chunks: {e}")
-            # Fallback: return concatenated raw bytes
+            # Last resort: return concatenated raw bytes
             return b''.join(self.chunks)
     
     def clear(self):
