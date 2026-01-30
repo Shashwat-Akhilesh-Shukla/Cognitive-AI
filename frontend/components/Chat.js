@@ -797,12 +797,11 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
         isOpen={showEmotionDetection}
         onClose={() => setShowEmotionDetection(false)}
         onEmotionDetected={(emotionData) => {
-          // Rolling window aggregation: keep predictions from last 2 seconds
+          // Optimized Rolling Window with Exponential Decay
           const now = Date.now();
-          const validWindow = 2000;
+          const validWindow = 1500; // Reduced window to 1.5s for responsiveness
 
           setDetectedEmotion(prev => {
-            // If we have no history or it's a fresh start
             let history = prev?.history || [];
 
             // Append new prediction
@@ -812,25 +811,35 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
               confidence: emotionData.confidence
             });
 
-            // Filter out old predictions
+            // Filter out old predictions (Hard cutoff)
             history = history.filter(item => now - item.timestamp < validWindow);
 
-            // Compute dominant emotion in window
-            const counts = {};
+            // Compute dominant emotion using Exponential Decay Weighting
+            const scores = {};
+
             history.forEach(item => {
-              counts[item.emotion] = (counts[item.emotion] || 0) + 1;
+              const ageSeconds = (now - item.timestamp) / 1000;
+              // Weight recent items much higher (decay factor 0.5 per second)
+              // item at 0s => weight 1.0
+              // item at 1s => weight 0.5
+              const weight = Math.pow(0.5, ageSeconds);
+
+              // Score = Confidence * Weight
+              const score = (item.confidence || 1.0) * weight;
+
+              scores[item.emotion] = (scores[item.emotion] || 0) + score;
             });
 
             let dominant = 'neutral';
-            let maxCount = 0;
-            for (const [em, count] of Object.entries(counts)) {
-              if (count > maxCount) {
-                maxCount = count;
+            let maxScore = 0;
+
+            for (const [em, score] of Object.entries(scores)) {
+              if (score > maxScore) {
+                maxScore = score;
                 dominant = em;
               }
             }
 
-            // Return updated state structure
             return {
               current: emotionData,
               history: history,

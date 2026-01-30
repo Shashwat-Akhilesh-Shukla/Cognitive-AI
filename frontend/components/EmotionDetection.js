@@ -225,7 +225,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
   // Handle video playback when minimized/expanded
   useEffect(() => {
     if (!videoRef.current) return
-    
+
     if (!isMinimized && detectionActive) {
       // When expanded, ensure video is playing and reattach stream if needed
       setTimeout(() => {
@@ -257,8 +257,8 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
         <div className="emotion-detection-header">
           <h2>Real-Time Emotion Detection</h2>
           <div className="header-buttons">
-            <button 
-              className="minimize-button" 
+            <button
+              className="minimize-button"
               onClick={() => setIsMinimized(!isMinimized)}
               title={isMinimized ? 'Expand' : 'Collapse'}
             >
@@ -311,7 +311,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           </button>
         </div>
 
-      <style jsx>{`
+        <style jsx>{`
         .emotion-detection-overlay {
           position: fixed;
           top: 0;

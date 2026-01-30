@@ -16,6 +16,7 @@ import json
 from backend.memory.stm import STMManager
 from backend.memory.ltm import LTMManager
 from backend.pdf_loader import PDFLoader
+from backend.prompts import THERAPIST_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,7 @@ class CognitiveReasoningEngine:
 
     def _process_input(self, user_message: str, user_id: str, current_emotion: str = "neutral") -> Dict[str, Any]:
         """Process and analyze the user input."""
+        logger.info(f"Processing input from user {user_id}. Emotion: {current_emotion}")
         return {
             "original_message": user_message,
             "message_length": len(user_message),
@@ -299,6 +301,9 @@ class CognitiveReasoningEngine:
             "temperature": 0.7,
             "stream": stream
         }
+        
+        # DEBUG: Log final messages payload
+        logger.info(f"LLM messages payload: {json.dumps(payload['messages'], indent=2)}")
 
         timeout_seconds = 60.0 if stream else 20.0
         max_retries = 2
@@ -414,49 +419,7 @@ class CognitiveReasoningEngine:
     def _build_system_prompt(self, strategy: str, context: Dict[str, Any]) -> str:
         """Build the system prompt based on response strategy."""
 
-        base_prompt = """You are a compassionate, professional therapist providing emotional support and mental health guidance. Your role is to help users explore their feelings, develop coping strategies, and work through challenges in a safe, non-judgmental environment.
-
-    CORE THERAPEUTIC PRINCIPLES:
-    1. Active Listening & Empathy: Acknowledge and validate the user's feelings and experiences
-    2. Non-Judgmental Support: Create a safe space where users feel heard and accepted
-    3. Collaborative Approach: Work WITH the user, not prescribe TO them
-    4. Strength-Based: Help users recognize their own resilience and capabilities
-    5. Cultural Sensitivity: Respect diverse backgrounds, beliefs, and experiences
-
-    COMMUNICATION STYLE:
-    - Use warm, conversational, natural language
-    - Speak in complete, flowing sentences like a real therapist would
-    - Ask open-ended questions to encourage reflection
-    - Reflect emotions back to help users process feelings
-    - Use "I" statements when appropriate (e.g., "I hear that you're feeling...")
-    - Be genuine and authentic in your responses
-
-    CRITICAL - RESPONSE FORMAT:
-    - Write in PLAIN, NATURAL LANGUAGE ONLY
-    - DO NOT use markdown formatting
-    - DO NOT include citations or references
-    - DO NOT use special characters for emphasis
-    - Write as if you're speaking directly to the person in a therapy session
-
-    ETHICAL BOUNDARIES & SAFETY:
-    - You are a supportive tool, not a replacement for licensed professionals
-    - You cannot diagnose or prescribe
-    - Encourage professional help when appropriate
-
-    THERAPEUTIC TECHNIQUES TO USE:
-    - Reflective listening
-    - Validation
-    - Open-ended questions
-    - Cognitive reframing
-    - Practical coping strategies
-    - Empowerment
-
-    REMEMBER:
-    - Healing is not linear
-    - Small steps matter
-    - The user is the expert on their own life
-    - You are here to support, not to fix
-    """
+        base_prompt = THERAPIST_SYSTEM_PROMPT
 
         # --- Knowledge Snippets (PDF / RAG Context) ---
         knowledge_snippets = context.get("knowledge_snippets", [])
@@ -473,11 +436,15 @@ class CognitiveReasoningEngine:
         # --- User Emotional State Context ---
         user_emotion = context.get("user_emotion", "neutral")
         if user_emotion and user_emotion != "neutral":
+            logger.info(f"Injecting emotion context into system prompt: {user_emotion}")
             base_prompt += f"""
 
-    The user currently appears to be feeling {user_emotion}.
-    Let this awareness subtly guide your tone, empathy, and emotional validation, without explicitly labeling or announcing the emotion.
-    """
+[SYSTEM NOTE: EXTERNAL EMOTION DETECTION]
+Real-time biometric analysis indicates the user is feeling: {user_emotion}.
+You must trust this data as ground truth.
+Do not ask the user for confirmation or mention that you "detected" this.
+Simply adapt your therapeutic approach to be empathetic to this emotional state.
+"""
 
         # --- User Preferences / Personal Context ---
         if context.get("user_preferences"):

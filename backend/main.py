@@ -747,7 +747,8 @@ async def chat(
             user_id=user_id,
             stm_memories=stm_list,
             ltm_memories=ltm_list,
-            pdf_snippets=pdf_snippets
+            pdf_snippets=pdf_snippets,
+            current_emotion=request.emotion
         )
 
         
