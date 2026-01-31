@@ -1,4 +1,4 @@
-# CognitiveAI – Memory-Augmented Personal Intelligence Engine
+# CognitiveAI – Memory-Augmented Personal Intelligence Engine Voice & Text & RAG & Emotions
 
 > **A production-grade AI therapist platform with dual-memory architecture, real-time voice conversations, multi-user authentication, and PDF knowledge ingestion.**
 
