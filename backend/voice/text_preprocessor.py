@@ -92,8 +92,8 @@ def normalize_punctuation(text: str) -> str:
     # Remove quotes but keep content
     text = re.sub(r'"([^"]+)"', r'\1', text)
     text = re.sub(r"'([^']+)'", r'\1', text)
-    text = re.sub(r'"([^"]+)"', r'\1', text)
-    text = re.sub(r''([^']+)'', r'\1', text)
+    text = re.sub(r'\u201c([^\u201d]+)\u201d', r'\1', text)  # Curly double quotes
+    text = re.sub(r'\u2018([^\u2019]+)\u2019', r'\1', text)  # Curly single quotes
     
     # Remove hashtags
     text = re.sub(r'#\w+', '', text)
