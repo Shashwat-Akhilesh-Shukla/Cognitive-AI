@@ -16,6 +16,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Import GPU detector for automatic device configuration
+try:
+    from backend.gpu_detector import detect_gpu, log_gpu_status
+    GPU_DETECTOR_AVAILABLE = True
+except ImportError:
+    logger.warning("GPU detector not available, defaulting to CPU")
+    GPU_DETECTOR_AVAILABLE = False
+
 
 class ModelNotInitializedError(Exception):
     """Raised when attempting to access models before startup initialization."""
@@ -99,6 +107,12 @@ class ModelManager:
         
         start_time = time.perf_counter()
         
+        # Detect and log GPU status
+        if GPU_DETECTOR_AVAILABLE:
+            logger.info("==" * 25)
+            gpu_info = log_gpu_status()
+            logger.info("==" * 25)
+        
         try:
             # Load STT model
             logger.info("=" * 50)
@@ -143,9 +157,18 @@ class ModelManager:
         """Internal: Load STT model. Called only during startup."""
         from .stt import WhisperSTT
         
+        # Get GPU-aware configuration
+        if GPU_DETECTOR_AVAILABLE:
+            from backend.gpu_detector import get_whisper_config
+            gpu_config = get_whisper_config()
+            device = os.getenv("WHISPER_DEVICE", gpu_config['device'])
+            compute_type = os.getenv("WHISPER_COMPUTE_TYPE", gpu_config['compute_type'])
+        else:
+            # Fallback to environment or defaults
+            device = os.getenv("WHISPER_DEVICE", "cpu")
+            compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+        
         model_name = os.getenv("WHISPER_MODEL", "openai/whisper-medium")
-        device = os.getenv("WHISPER_DEVICE", "cpu")
-        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
         
         logger.info(f"  Model: {model_name}")
         logger.info(f"  Device: {device}, Compute: {compute_type}")
