@@ -14,7 +14,7 @@ PyJWT
 redis
 pinecone
 
-numpy<2.4,>=2.0  # Version constraint for Numba compatibility
+numpy>=1.24.3,<2.0  # Compatible with both TTS and faster-whisper
 pdfplumber
 
 # Voice Processing Dependencies

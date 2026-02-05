@@ -7,10 +7,10 @@
 FROM python:3.11-slim as base
 
 # Install system dependencies
+# Note: CUDA compatibility libraries are loaded only if GPU is available
 RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
-    # Optional: CUDA compatibility libraries (loaded only if GPU available)
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
