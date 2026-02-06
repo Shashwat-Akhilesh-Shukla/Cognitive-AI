@@ -316,10 +316,26 @@ async def health_check():
         "services": {}
     }
 
-    
-    health_status["services"]["database"] = {"available": db is not None, "status": "ok" if db else "unavailable"}
+    # Database health check (PostgreSQL/SQLite)
+    db_health = {"available": db is not None, "status": "unknown"}
+    if db:
+        try:
+            from backend.db_config import check_database_connection, get_pool_status
+            if check_database_connection():
+                db_health["status"] = "ok"
+                # Add connection pool stats if available
+                pool_stats = get_pool_status()
+                if pool_stats:
+                    db_health["pool"] = pool_stats
+            else:
+                db_health["status"] = "connection_failed"
+                health_status["status"] = "degraded"
+        except Exception as e:
+            db_health["status"] = f"error: {str(e)}"
+            health_status["status"] = "degraded"
+    health_status["services"]["database"] = db_health
 
-    
+    # Redis health check
     redis_health = {"available": stm_manager is not None, "status": "unknown"}
     if stm_manager:
         try:
@@ -332,18 +348,29 @@ async def health_check():
             health_status["status"] = "degraded"
     health_status["services"]["redis"] = redis_health
 
-    
+    # Cache health check (Redis caching layer)
+    cache_health = {"available": True, "status": "unknown"}
+    try:
+        from backend.cache import get_cache
+        cache = get_cache()
+        cache_stats = cache.health_check()
+        cache_health.update(cache_stats)
+    except Exception as e:
+        cache_health["status"] = f"error: {str(e)}"
+    health_status["services"]["cache"] = cache_health
+
+    # Pinecone health check
     pinecone_health = {"available": ltm_manager is not None, "status": "unknown"}
     if ltm_manager:
         try:
-            
+            # Basic availability check
             pinecone_health["status"] = "ok"
         except Exception as e:
             pinecone_health["status"] = f"error: {str(e)}"
             
     health_status["services"]["pinecone"] = pinecone_health
 
-    
+    # Perplexity health check
     perplexity_health = {"available": reasoning_engine is not None and reasoning_engine.perplexity_api_key, "status": "unknown"}
     if perplexity_health["available"]:
         try:
@@ -359,7 +386,7 @@ async def health_check():
         perplexity_health["status"] = "not_configured"
     health_status["services"]["perplexity"] = perplexity_health
 
-    
+    # Systems overview
     health_status["systems"] = {
         "database": db is not None,
         "stm": stm_manager is not None,
@@ -369,6 +396,7 @@ async def health_check():
     }
 
     return health_status
+
 
 
 

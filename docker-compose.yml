@@ -1,6 +1,41 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-therapist-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-ai_therapist}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=${POSTGRES_DB:-ai_therapist}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ai-therapist-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_therapist}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ai-therapist-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - ai-therapist-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Backend Service (FastAPI)
   backend:
     build:
@@ -10,11 +45,14 @@ services:
     ports:
       - "8000:8000" # Backend API
     environment:
+      # Database Configuration
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-ai_therapist}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-ai_therapist}
+      - REDIS_URL=redis://redis:6379/0
+
       # API Keys
       - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
       - PINECONE_API_KEY=${PINECONE_API_KEY}
       - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-us-west4-gcp-free}
-      - REDIS_URL=${REDIS_URL}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - JINA_API_KEY=${JINA_API_KEY}
 
@@ -37,10 +75,14 @@ services:
       # - COQUI_MODEL=tts_models/en/ljspeech/tacotron2-DDC
 
     volumes:
-      # Persist database
-      - ./data:/app/data
       # Persist model cache (prevents re-downloading on restart)
       - ai-therapist-models:/app/models
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
     networks:
       - ai-therapist-network
@@ -98,5 +140,10 @@ networks:
     driver: bridge
 
 volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
   ai-therapist-models:
     driver: local
+
