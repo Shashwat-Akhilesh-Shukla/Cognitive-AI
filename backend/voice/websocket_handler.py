@@ -256,11 +256,17 @@ class VoiceWebSocketHandler:
     
     async def _handle_audio(self, session: VoiceSession, message: dict):
         """
-        Handle incoming audio data with VAD-based triggering.
+        Handle incoming audio data.
+        
+        Supports two modes:
+        1. Complete recording (complete=True): Process immediately
+        2. Streaming chunks (legacy): Buffer and trigger with VAD
         """
         try:
             # Extract audio data
             audio_data_b64 = message.get('data')
+            is_complete = message.get('complete', False)
+            
             if not audio_data_b64:
                 logger.warning("No audio data provided in message")
                 return
@@ -268,18 +274,25 @@ class VoiceWebSocketHandler:
             # Decode audio
             audio_bytes = session.audio_processor.base64_to_bytes(audio_data_b64)
             
-            # Add to VAD buffer
-            session.vad_buffer.add_chunk(audio_bytes)
-            
-            # Update status to listening
-            if session.current_state != "listening":
-                await session.send_status("listening", "Receiving audio")
-            
-            # Check if VAD triggers processing
-            if session.vad_buffer.should_trigger():
-                logger.info(f"[VAD] Silence detected, triggering STT for {session.user_id}")
+            if is_complete:
+                # This is a complete recording, process immediately
+                logger.info(f"[VOICE] Received complete recording: {len(audio_bytes)} bytes")
+                await session.send_status("processing", "Processing audio")
                 # Process in background to keep WebSocket responsive
-                asyncio.create_task(self._process_audio_buffer(session))
+                asyncio.create_task(self._process_complete_audio(session, audio_bytes))
+            else:
+                # Legacy streaming mode: add to VAD buffer
+                session.vad_buffer.add_chunk(audio_bytes)
+                
+                # Update status to listening
+                if session.current_state != "listening":
+                    await session.send_status("listening", "Receiving audio")
+                
+                # Check if VAD triggers processing
+                if session.vad_buffer.should_trigger():
+                    logger.info(f"[VAD] Silence detected, triggering STT for {session.user_id}")
+                    # Process in background to keep WebSocket responsive
+                    asyncio.create_task(self._process_audio_buffer(session))
         
         except Exception as e:
             logger.error(f"Error handling audio: {e}", exc_info=True)
@@ -324,17 +337,29 @@ class VoiceWebSocketHandler:
                 
                 # Resample to 16kHz for Whisper
                 try:
+                    logger.info(f"Resampling audio from buffer to 16kHz WAV: {len(audio_bytes)} bytes")
                     audio_bytes = session.audio_processor.resample_audio(audio_bytes, target_sample_rate=16000)
+                    logger.info(f"Audio resampled successfully: {len(audio_bytes)} bytes")
+                    
                 except Exception as e:
-                    logger.warning(f"Resample failed: {e}")
+                    logger.error(f"Audio resampling failed: {e}", exc_info=True)
+                    await session.send_error(f"Audio processing failed: {str(e)}. Please try again.")
+                    await session.send_status("idle", "Ready")
+                    return
                 
                 # Run STT in thread pool (CPU-bound)
                 loop = asyncio.get_event_loop()
-                transcript_result = await loop.run_in_executor(
-                    _executor,
-                    stt_model.transcribe_sync,
-                    audio_bytes
-                )
+                try:
+                    transcript_result = await loop.run_in_executor(
+                        _executor,
+                        stt_model.transcribe_sync,
+                        audio_bytes
+                    )
+                except Exception as stt_error:
+                    logger.error(f"STT transcription failed: {stt_error}", exc_info=True)
+                    await session.send_error(f"Speech recognition failed: {str(stt_error)}")
+                    await session.send_status("idle", "Ready")
+                    return
                 
                 transcript_text = transcript_result.get('text', '').strip()
                 t_stt_end = time.perf_counter()
@@ -410,6 +435,156 @@ class VoiceWebSocketHandler:
                 logger.error(f"Error processing audio buffer: {e}", exc_info=True)
                 await session.send_error(f"Processing error: {str(e)}")
                 session.vad_buffer.clear()
+                await session.send_status("idle", "Ready")
+            
+            finally:
+                session._is_processing = False
+    
+    async def _process_complete_audio(self, session: VoiceSession, audio_bytes: bytes):
+        """
+        Process a complete audio recording through STT → LLM → TTS pipeline.
+        
+        This method handles complete recordings sent from the frontend,
+        avoiding the WebM chunk concatenation issues.
+        """
+        # Prevent overlapping processing
+        if session._is_processing:
+            logger.warning("Already processing, skipping")
+            return
+        
+        async with session._processing_lock:
+            session._is_processing = True
+            t_start = time.perf_counter()
+            
+            try:
+                await session.send_status("processing", "Transcribing audio")
+                
+                # Validate audio size
+                if not audio_bytes or len(audio_bytes) < 1000:
+                    logger.warning("Audio too short, skipping")
+                    await session.send_status("idle", "Audio too short")
+                    return
+                
+                logger.info(f"[VOICE_TIMING] Processing complete recording: {len(audio_bytes)} bytes")
+                
+                # ===== STT (run in thread pool) =====
+                t_stt_start = time.perf_counter()
+                logger.info(f"[VOICE_TIMING] Audio→STT start: {(t_stt_start - t_start)*1000:.0f}ms")
+                
+                stt_model = ModelManager.get_stt_model()
+                if not stt_model:
+                    await session.send_error("STT model not available")
+                    return
+                
+                # Validate and resample to 16kHz for Whisper
+                try:
+                    # Resample to 16kHz first
+                    logger.info(f"Resampling audio from WebM to 16kHz WAV: {len(audio_bytes)} bytes")
+                    audio_bytes = session.audio_processor.resample_audio(audio_bytes, target_sample_rate=16000)
+                    logger.info(f"Audio resampled successfully: {len(audio_bytes)} bytes")
+                    
+                    # Now validate the resampled WAV data
+                    if not session.audio_validator.validate_format(audio_bytes):
+                        logger.error("Invalid WAV format after resampling")
+                        await session.send_error("Audio resampling failed. Please try again.")
+                        await session.send_status("idle", "Ready")
+                        return
+                    
+                    logger.info("Resampled WAV validated successfully")
+                    
+                except Exception as e:
+                    logger.error(f"Audio resampling failed: {e}", exc_info=True)
+                    await session.send_error(f"Audio processing failed: {str(e)}. Please try again.")
+                    await session.send_status("idle", "Ready")
+                    return
+                
+                # Run STT in thread pool (CPU-bound)
+                loop = asyncio.get_event_loop()
+                try:
+                    transcript_result = await loop.run_in_executor(
+                        _executor,
+                        stt_model.transcribe_sync,
+                        audio_bytes
+                    )
+                except Exception as stt_error:
+                    logger.error(f"STT transcription failed: {stt_error}", exc_info=True)
+                    await session.send_error(f"Speech recognition failed: {str(stt_error)}")
+                    await session.send_status("idle", "Ready")
+                    return
+                
+                transcript_text = transcript_result.get('text', '').strip()
+                t_stt_end = time.perf_counter()
+                logger.info(f"[VOICE_TIMING] STT duration: {(t_stt_end - t_stt_start)*1000:.0f}ms")
+                
+                if not transcript_text:
+                    logger.warning("Empty transcription")
+                    await session.send_status("idle", "No speech detected")
+                    return
+                
+                logger.info(f"✓ Transcribed: {transcript_text}")
+                await session.send_transcript(transcript_text, transcript_result.get('language', 'en'))
+                
+                # ===== LLM (async) =====
+                t_llm_start = time.perf_counter()
+                await session.send_status("processing", "Generating response")
+                
+                response_text = await self._process_with_llm(session, transcript_text)
+                
+                t_llm_end = time.perf_counter()
+                logger.info(f"[VOICE_TIMING] LLM duration: {(t_llm_end - t_llm_start)*1000:.0f}ms")
+                
+                if not response_text:
+                    await session.send_error("Failed to generate response")
+                    return
+                
+                logger.info(f"✓ LLM Response: {response_text[:100]}...")
+                
+                # Send text response
+                try:
+                    await session.websocket.send_json({
+                        'type': 'response',
+                        'text': response_text
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to send response: {e}")
+                
+                # ===== TTS (run in thread pool) =====
+                t_tts_start = time.perf_counter()
+                await session.send_status("speaking", "Synthesizing speech")
+                
+                tts_model = ModelManager.get_tts_model()
+                if not tts_model:
+                    logger.warning("TTS model not available")
+                    await session.send_status("idle", "Ready")
+                    return
+                
+                # Sanitize text for TTS
+                from .text_preprocessor import sanitize_for_tts
+                clean_text = sanitize_for_tts(response_text)
+                
+                # Run TTS in thread pool (CPU-bound)
+                audio_response = await loop.run_in_executor(
+                    _executor,
+                    tts_model.synthesize_sync,
+                    clean_text
+                )
+                
+                t_tts_end = time.perf_counter()
+                logger.info(f"[VOICE_TIMING] TTS duration: {(t_tts_end - t_tts_start)*1000:.0f}ms")
+                
+                # Send audio
+                await session.send_audio(audio_response)
+                
+                # Total timing
+                total_ms = (t_tts_end - t_start) * 1000
+                logger.info(f"[VOICE_TIMING] ===== Total round-trip: {total_ms:.0f}ms =====")
+                session.stats['total_latency_ms'].append(total_ms)
+                
+                await session.send_status("idle", "Ready for next message")
+            
+            except Exception as e:
+                logger.error(f"Error processing complete audio: {e}", exc_info=True)
+                await session.send_error(f"Processing error: {str(e)}")
                 await session.send_status("idle", "Ready")
             
             finally:

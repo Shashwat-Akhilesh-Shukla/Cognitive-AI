@@ -34,6 +34,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   const audioContextRef = useRef(null)
   const audioQueueRef = useRef([])
   const isPlayingRef = useRef(false)
+  const audioChunksRef = useRef([])  // Store audio chunks before sending
 
   const current = chats.find(c => c.id === currentChatId) || { id: null, messages: [] }
 
@@ -463,29 +464,61 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
       mediaRecorderRef.current = mediaRecorder
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          // Convert blob to base64 and send
-          const reader = new FileReader()
-          reader.onloadend = () => {
-            const base64 = reader.result.split(',')[1]
-            console.log(`[Voice] Sending audio chunk: ${base64.length} bytes`)
-            ws.send(JSON.stringify({
-              type: 'audio',
-              data: base64
-            }))
-          }
-          reader.readAsDataURL(event.data)
+        if (event.data.size > 0) {
+          // Store chunk for later processing instead of sending immediately
+          // This ensures we create a complete, valid WebM file
+          audioChunksRef.current.push(event.data)
+          console.log(`[Voice] Buffered audio chunk ${audioChunksRef.current.length}: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = () => {
-        console.log('[Voice] Recording stopped, sending stop signal to backend')
-        // Send stop signal to backend to process remaining audio
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'stop'
-          }))
+        console.log('[Voice] Recording stopped, processing complete audio')
+
+        if (audioChunksRef.current.length === 0) {
+          console.warn('[Voice] No audio chunks recorded')
+          setVoiceState('idle')
+          setError('No audio recorded. Please try again.')
+          return
         }
+
+        // Create complete blob from all accumulated chunks
+        // This creates a valid WebM file that FFmpeg can decode
+        const completeBlob = new Blob(audioChunksRef.current, {
+          type: audioChunksRef.current[0].type || 'audio/webm'
+        })
+
+        console.log(`[Voice] Complete recording: ${completeBlob.size} bytes from ${audioChunksRef.current.length} chunks`)
+
+        // Convert complete blob to base64 and send
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const base64 = reader.result.split(',')[1]
+          console.log(`[Voice] Sending complete audio: ${base64.length} base64 chars`)
+
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'audio',
+              data: base64,
+              complete: true  // Flag to indicate this is a complete recording
+            }))
+            console.log('[Voice] Complete audio sent successfully')
+          } else {
+            console.error('[Voice] WebSocket not open, cannot send audio')
+            setError('Connection lost. Please try again.')
+            setVoiceState('idle')
+          }
+        }
+        reader.onerror = (error) => {
+          console.error('[Voice] Failed to read audio blob:', error)
+          setError('Failed to process audio recording')
+          setVoiceState('idle')
+        }
+        reader.readAsDataURL(completeBlob)
+
+        // Clear chunks for next recording
+        audioChunksRef.current = []
+        console.log('[Voice] Audio chunks cleared for next recording')
       }
 
       mediaRecorder.onerror = (event) => {
@@ -534,6 +567,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     setVoiceTranscript('')
     setIsRecording(false)
     audioQueueRef.current = []
+    audioChunksRef.current = []  // Clear accumulated audio chunks
   }
 
   function toggleRecording() {
@@ -554,6 +588,11 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     }
 
     console.log('[Voice] Starting recording')
+
+    // Clear any previous audio chunks to ensure clean state
+    audioChunksRef.current = []
+    console.log('[Voice] Cleared previous audio chunks')
+
     setIsRecording(true)
     setVoiceState('listening')
     setVoiceTranscript('')
@@ -576,15 +615,9 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     setIsRecording(false)
     setVoiceState('processing')
 
+    // Stop the MediaRecorder - this will trigger the onstop handler
+    // which will send the complete audio to the backend
     mediaRecorderRef.current.stop()
-
-    // Send stop message to backend to trigger processing
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'stop'
-      }))
-      console.log('[Voice] Sent stop message to backend')
-    }
   }
 
   async function playNextAudio() {

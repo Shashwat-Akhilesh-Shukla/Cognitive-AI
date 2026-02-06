@@ -72,7 +72,7 @@ class AudioProcessor:
         Resample audio to target sample rate (Whisper requires 16kHz).
         
         Args:
-            audio_bytes: WAV audio data
+            audio_bytes: Audio data in any format (WebM, WAV, etc.)
             target_sample_rate: Target sample rate in Hz
         
         Returns:
@@ -81,25 +81,52 @@ class AudioProcessor:
         try:
             from pydub import AudioSegment
             
-            audio = AudioSegment.from_wav(io.BytesIO(audio_bytes))
+            # Try to load audio - auto-detect format
+            # This handles WebM, WAV, MP3, etc.
+            try:
+                audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+                logger.info(f"Loaded audio: {len(audio)}ms, {audio.frame_rate}Hz, {audio.channels}ch, {audio.sample_width*8}bit")
+            except Exception as load_error:
+                logger.error(f"Failed to load audio for resampling: {load_error}")
+                raise ValueError(f"Cannot load audio data: {load_error}")
             
             # Resample if needed
             if audio.frame_rate != target_sample_rate:
+                logger.info(f"Resampling from {audio.frame_rate}Hz to {target_sample_rate}Hz")
                 audio = audio.set_frame_rate(target_sample_rate)
+            else:
+                logger.info(f"Audio already at target sample rate: {target_sample_rate}Hz")
             
             # Convert to mono if stereo
             if audio.channels > 1:
+                logger.info(f"Converting from {audio.channels} channels to mono")
                 audio = audio.set_channels(1)
             
-            # Export resampled audio
-            resampled_io = io.BytesIO()
-            audio.export(resampled_io, format="wav")
-            resampled_io.seek(0)
+            # Ensure 16-bit sample width (required by Whisper)
+            if audio.sample_width != 2:  # 2 bytes = 16 bits
+                logger.info(f"Converting from {audio.sample_width*8}bit to 16bit")
+                audio = audio.set_sample_width(2)
             
-            return resampled_io.read()
+            # Export resampled audio as WAV
+            resampled_io = io.BytesIO()
+            audio.export(
+                resampled_io, 
+                format="wav",
+                parameters=["-ar", str(target_sample_rate), "-ac", "1", "-sample_fmt", "s16"]
+            )
+            resampled_io.seek(0)
+            wav_bytes = resampled_io.read()
+            
+            logger.info(f"Resampled audio exported: {len(wav_bytes)} bytes")
+            
+            # Validate the output
+            if len(wav_bytes) < 100:
+                raise ValueError(f"Resampled audio too small: {len(wav_bytes)} bytes")
+            
+            return wav_bytes
             
         except Exception as e:
-            logger.error(f"Failed to resample audio: {e}")
+            logger.error(f"Failed to resample audio: {e}", exc_info=True)
             raise
     
     @staticmethod
@@ -221,7 +248,12 @@ class AudioBuffer:
             # CRITICAL: For WebM/streaming formats, concatenate raw bytes FIRST
             # Individual chunks are not valid standalone audio files
             combined_bytes = b''.join(self.chunks)
-            logger.info(f"Concatenated {len(self.chunks)} chunks into {len(combined_bytes)} bytes")
+            logger.info(f"[BUFFER] Concatenated {len(self.chunks)} chunks into {len(combined_bytes)} bytes")
+            
+            # Validate we have enough data
+            if len(combined_bytes) < 100:
+                logger.warning(f"[BUFFER] Combined audio too small ({len(combined_bytes)} bytes), likely invalid")
+                return b''
             
             # Now decode the complete audio stream
             try:
@@ -229,23 +261,30 @@ class AudioBuffer:
                     io.BytesIO(combined_bytes),
                     format="webm"  # Explicitly specify WebM format
                 )
-                logger.info(f"Successfully decoded WebM audio: {len(audio)}ms, {audio.frame_rate}Hz")
+                logger.info(f"[BUFFER] Successfully decoded WebM audio: {len(audio)}ms, {audio.frame_rate}Hz")
             except Exception as webm_error:
-                logger.warning(f"Failed to decode as WebM, trying auto-detect: {webm_error}")
+                logger.warning(f"[BUFFER] Failed to decode as WebM: {webm_error}")
                 # Fallback: let pydub auto-detect format
-                audio = AudioSegment.from_file(io.BytesIO(combined_bytes))
+                try:
+                    audio = AudioSegment.from_file(io.BytesIO(combined_bytes))
+                    logger.info(f"[BUFFER] Auto-detected format: {len(audio)}ms, {audio.frame_rate}Hz")
+                except Exception as auto_error:
+                    logger.error(f"[BUFFER] All decode attempts failed. WebM: {webm_error}, Auto: {auto_error}")
+                    raise ValueError(f"Failed to decode audio: {auto_error}")
             
             # Export as WAV
             output_io = io.BytesIO()
             audio.export(output_io, format="wav")
             output_io.seek(0)
+            wav_bytes = output_io.read()
             
-            return output_io.read()
+            logger.info(f"[BUFFER] Exported to WAV: {len(wav_bytes)} bytes")
+            return wav_bytes
             
         except Exception as e:
-            logger.error(f"Failed to combine audio chunks: {e}")
-            # Last resort: return concatenated raw bytes
-            return b''.join(self.chunks)
+            logger.error(f"[BUFFER] Failed to combine audio chunks: {e}", exc_info=True)
+            # Last resort: return empty instead of potentially corrupt data
+            return b''
     
     def clear(self):
         """Clear the buffer."""
@@ -389,19 +428,72 @@ class VADBuffer:
         
         try:
             from pydub import AudioSegment
+            import tempfile
+            import os
             
             # Concatenate raw bytes first (critical for WebM streaming)
             combined_bytes = b''.join(self.chunks)
+            logger.info(f"[VAD] Concatenated {len(self.chunks)} chunks into {len(combined_bytes)} bytes")
             
-            # Try to decode as WebM first
+            # Validate we have enough data
+            if len(combined_bytes) < 100:
+                logger.warning(f"[VAD] Combined audio too small ({len(combined_bytes)} bytes), likely invalid")
+                self.clear()
+                return b''
+            
+            # Strategy 1: Try to decode as WebM from memory
+            audio = None
             try:
                 audio = AudioSegment.from_file(
                     io.BytesIO(combined_bytes),
                     format="webm"
                 )
-            except Exception:
-                # Fallback to auto-detect
-                audio = AudioSegment.from_file(io.BytesIO(combined_bytes))
+                logger.info(f"[VAD] Successfully decoded as WebM: {len(audio)}ms, {audio.frame_rate}Hz, {audio.channels}ch")
+            except Exception as webm_error:
+                logger.warning(f"[VAD] WebM decode from memory failed: {str(webm_error)[:200]}")
+                
+                # Strategy 2: Try auto-detect from memory
+                try:
+                    audio = AudioSegment.from_file(io.BytesIO(combined_bytes))
+                    logger.info(f"[VAD] Auto-detected format: {len(audio)}ms, {audio.frame_rate}Hz, {audio.channels}ch")
+                except Exception as auto_error:
+                    logger.warning(f"[VAD] Auto-detect from memory failed: {str(auto_error)[:200]}")
+                    
+                    # Strategy 3: Save to temp file and try to read (sometimes fixes format issues)
+                    temp_path = None
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
+                            temp_path = temp_file.name
+                            temp_file.write(combined_bytes)
+                        
+                        logger.info(f"[VAD] Trying to decode from temp file: {temp_path}")
+                        
+                        # Try WebM from file
+                        try:
+                            audio = AudioSegment.from_file(temp_path, format="webm")
+                            logger.info(f"[VAD] Successfully decoded WebM from file: {len(audio)}ms")
+                        except Exception as file_webm_error:
+                            logger.warning(f"[VAD] WebM from file failed: {str(file_webm_error)[:200]}")
+                            # Try auto-detect from file
+                            try:
+                                audio = AudioSegment.from_file(temp_path)
+                                logger.info(f"[VAD] Auto-detected from file: {len(audio)}ms")
+                            except Exception as file_auto_error:
+                                logger.error(f"[VAD] All decode strategies failed")
+                                raise ValueError(f"Failed to decode audio data: {str(file_auto_error)[:200]}")
+                    finally:
+                        # Clean up temp file
+                        if temp_path and os.path.exists(temp_path):
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+            
+            # If we still don't have audio, something is very wrong
+            if audio is None:
+                logger.error(f"[VAD] Audio is None after all decode attempts")
+                self.clear()
+                raise ValueError("Failed to decode audio: all strategies failed")
             
             # Export as WAV
             output_io = io.BytesIO()
@@ -409,9 +501,12 @@ class VADBuffer:
             output_io.seek(0)
             wav_bytes = output_io.read()
             
+            logger.info(f"[VAD] Exported to WAV: {len(wav_bytes)} bytes")
+            
         except Exception as e:
-            logger.warning(f"Failed to convert audio: {e}")
-            wav_bytes = b''.join(self.chunks)
+            logger.error(f"[VAD] Failed to convert audio: {e}", exc_info=True)
+            self.clear()
+            raise  # Re-raise instead of returning raw bytes
         
         # Reset buffer
         self.clear()
