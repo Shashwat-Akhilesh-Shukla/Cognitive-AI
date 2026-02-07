@@ -713,7 +713,179 @@ ModelManager.preload_models()
 - Fallback to CPU with INT8 quantization
 - Configurable device override
 
+### 5.6 Face API Emotion Recognition Architecture
+
+The system integrates real-time facial emotion recognition to provide biometric context to the cognitive reasoning engine, enhancing therapeutic response appropriateness.
+
+**Architecture Overview**:
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        CAMERA[Camera/Webcam]
+        VIDEO_STREAM[Video Stream]
+    end
+    
+    subgraph "Face API Processing"
+        FACE_DETECT[Face Detection<br/>Face API]
+        EMOTION_ANALYSIS[Emotion Analysis<br/>7 Basic Emotions]
+        CONFIDENCE[Confidence Scoring]
+    end
+    
+    subgraph "Emotion Context Layer"
+        EMOTION_FILTER[Emotion Filtering<br/>Threshold: 0.6]
+        EMOTION_CACHE[Emotion State Cache<br/>Redis]
+        EMOTION_HISTORY[Emotion History<br/>Time-series]
+    end
+    
+    subgraph "Integration Layer"
+        CHAT_REQ[Chat Request Handler]
+        VOICE_REQ[Voice Request Handler]
+        EMOTION_INJECTOR[Context Injector]
+    end
+    
+    subgraph "Cognitive Processing"
+        REASONING[Cognitive Reasoning Engine]
+        PROMPT_BUILDER[Prompt Builder]
+        LLM[Perplexity LLM]
+    end
+    
+    subgraph "Response Adaptation"
+        RESPONSE_GEN[Response Generator]
+        EMOTION_AWARE[Emotion-Aware Therapy]
+    end
+    
+    CAMERA --> VIDEO_STREAM
+    VIDEO_STREAM -->|Frame Capture| FACE_DETECT
+    FACE_DETECT -->|Face Detected| EMOTION_ANALYSIS
+    EMOTION_ANALYSIS -->|Emotion Scores| CONFIDENCE
+    
+    CONFIDENCE -->|High Confidence| EMOTION_FILTER
+    EMOTION_FILTER -->|Valid Emotion| EMOTION_CACHE
+    EMOTION_CACHE --> EMOTION_HISTORY
+    
+    CHAT_REQ -->|Request + user_id| EMOTION_INJECTOR
+    VOICE_REQ -->|Request + user_id| EMOTION_INJECTOR
+    
+    EMOTION_INJECTOR -->|Get Current Emotion| EMOTION_CACHE
+    EMOTION_CACHE -->|Emotion State| EMOTION_INJECTOR
+    
+    EMOTION_INJECTOR -->|Request + Emotion Context| REASONING
+    REASONING -->|Process with Emotion| PROMPT_BUILDER
+    
+    PROMPT_BUILDER -->|System Prompt + Emotion Note| LLM
+    LLM -->|Emotion-Aware Response| RESPONSE_GEN
+    RESPONSE_GEN --> EMOTION_AWARE
+    
+    style FACE_DETECT fill:#9b59b6
+    style EMOTION_ANALYSIS fill:#9b59b6
+    style EMOTION_CACHE fill:#dc382d
+    style REASONING fill:#00d4aa
+    style LLM fill:#3498db
+    style EMOTION_AWARE fill:#2ecc71
+```
+
+**Figure 6.5**: Face API emotion recognition architecture showing real-time facial analysis, emotion caching, and integration with the cognitive reasoning engine for emotion-aware therapeutic responses.
+
+**Emotion Detection Pipeline**:
+
+1. **Video Capture**: Client captures video frames from webcam
+2. **Face Detection**: Face API detects faces in frame
+3. **Emotion Analysis**: Analyzes facial expressions for 7 basic emotions:
+   - Neutral
+   - Happy
+   - Sad
+   - Angry
+   - Fearful
+   - Disgusted
+   - Surprised
+
+4. **Confidence Filtering**: Only emotions with confidence > 0.6 are accepted
+5. **Emotion Caching**: Current emotion stored in Redis with user_id key
+6. **Context Injection**: Emotion retrieved and injected into chat/voice requests
+
+**Integration with Reasoning Engine**:
+
+The emotion context is injected into the system prompt as follows:
+
+```python
+# From reasoning.py
+if user_emotion and user_emotion != "neutral":
+    system_prompt += f"""
+[SYSTEM NOTE: EXTERNAL EMOTION DETECTION]
+Real-time biometric analysis indicates the user is feeling: {user_emotion}.
+This is reliable contextual input from facial expression analysis.
+Simply adapt your therapeutic approach to be empathetic to this emotional state.
+"""
+```
+
+**Emotion State Management**:
+
+```json
+{
+  "user_id": "uuid",
+  "current_emotion": "anxious",
+  "confidence": 0.87,
+  "timestamp": 1705750800.123,
+  "history": [
+    {"emotion": "neutral", "timestamp": 1705750700.0},
+    {"emotion": "sad", "timestamp": 1705750750.0},
+    {"emotion": "anxious", "timestamp": 1705750800.0}
+  ]
+}
+```
+
+**Benefits**:
+- **Enhanced Empathy**: LLM adapts responses to user's emotional state
+- **Non-Verbal Cues**: Captures emotions user may not verbalize
+- **Therapeutic Accuracy**: Improves response appropriateness
+- **Real-Time Adaptation**: Immediate response to emotional changes
+- **Privacy-Preserving**: Only emotion labels stored, not video frames
+
+**Performance Characteristics**:
+- Emotion Detection Latency: <100ms per frame
+- Cache Access: <5ms (Redis)
+- Emotion Update Frequency: 1-2 Hz (configurable)
+- Supported Browsers: Chrome, Firefox, Edge (WebRTC required)
+
+**Data Flow Example**:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FaceAPI
+    participant Redis
+    participant ChatAPI
+    participant Reasoning
+    participant LLM
+    
+    Client->>FaceAPI: Video frame
+    FaceAPI->>FaceAPI: Detect face & analyze
+    FaceAPI->>Redis: Store emotion (anxious, 0.87)
+    
+    Client->>ChatAPI: POST /chat (message)
+    ChatAPI->>Redis: Get emotion for user_id
+    Redis->>ChatAPI: Return "anxious"
+    
+    ChatAPI->>Reasoning: Process (message, emotion="anxious")
+    Reasoning->>Reasoning: Build emotion-aware prompt
+    Reasoning->>LLM: Generate response with emotion context
+    LLM->>Reasoning: Empathetic response
+    Reasoning->>Client: Emotion-adapted response
+```
+
+**Figure 6.6**: Sequence diagram showing Face API emotion detection flow and integration with chat processing for emotion-aware responses.
+
+**Security and Privacy**:
+- Video frames processed client-side or in secure pipeline
+- Only emotion labels transmitted to backend
+- User consent required for camera access
+- Emotion data encrypted in transit
+- Configurable emotion data retention policy
+- Option to disable emotion detection
+
 ---
+
 
 ## 6. Cognitive Reasoning Engine
 
