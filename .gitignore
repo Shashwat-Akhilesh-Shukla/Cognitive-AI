@@ -6,7 +6,7 @@ __pycache__/
 node_modules/
 *.md
 !README.md
-!RESEARCH_PAPER.md
+!RESEARCH.md
 *.db
 cognitiveai*
 docs&testing/*
