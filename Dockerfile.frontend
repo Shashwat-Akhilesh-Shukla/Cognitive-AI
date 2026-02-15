@@ -1,29 +1,21 @@
+# syntax=docker/dockerfile:1
+
 # Multi-stage Dockerfile for Next.js Frontend
-# ============================================
-# Stage 1: Dependencies
-# ============================================
-FROM node:18-alpine AS dependencies
-
-WORKDIR /app
-
-# Copy package files
-COPY frontend/package*.json ./
-
-# Install dependencies (including dev dependencies for build)
-RUN npm ci
+# Optimized for fast rebuilds with BuildKit cache mounts
 
 # ============================================
-# Stage 2: Builder
+# Stage 1: Builder
 # ============================================
 FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better layer caching
 COPY frontend/package*.json ./
 
-# Install all dependencies (including dev dependencies)
-RUN npm ci
+# Install all dependencies with cache mount for faster rebuilds
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 # Copy source code
 COPY frontend/ ./
@@ -32,7 +24,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ============================================
-# Stage 3: Runner
+# Stage 2: Runner
 # ============================================
 FROM node:18-alpine AS runner
 

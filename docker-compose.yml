@@ -1,5 +1,10 @@
 version: '3.8'
 
+# Enable BuildKit for faster builds with cache mounts
+x-buildkit-env: &buildkit-env
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
 services:
   # PostgreSQL Database
   postgres:
@@ -15,7 +20,7 @@ services:
       - ai-therapist-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_therapist}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_therapist}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,7 +36,7 @@ services:
       - ai-therapist-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -146,4 +151,3 @@ volumes:
     driver: local
   ai-therapist-models:
     driver: local
-

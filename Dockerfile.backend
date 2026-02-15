@@ -1,8 +1,11 @@
+# syntax=docker/dockerfile:1
+
 # Multi-stage Dockerfile for AI Therapist with GPU Support
 # Automatically detects and uses GPU when available, falls back to CPU
+# Optimized for fast rebuilds with BuildKit cache mounts
 
 # ============================================
-# Stage 1: Base Image with System Dependencies
+# Stage 1: Base Image with Dependencies
 # ============================================
 FROM python:3.11-slim as base
 
@@ -15,25 +18,22 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# ============================================
-# Stage 2: Python Dependencies
-# ============================================
-FROM base as dependencies
-
-# Copy requirements file
+# Copy requirements file first for better layer caching
 COPY backend/requirements.txt ./backend/
 
-# Install Python dependencies (except PyTorch)
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# Install Python dependencies with cache mount for faster rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r backend/requirements.txt
 
 # Install PyTorch conditionally based on GPU availability
 COPY install_pytorch.sh ./
-RUN chmod +x install_pytorch.sh && ./install_pytorch.sh
+RUN --mount=type=cache,target=/root/.cache/pip \
+    chmod +x install_pytorch.sh && ./install_pytorch.sh
 
 # ============================================
-# Stage 3: Application
+# Stage 2: Application
 # ============================================
-FROM dependencies as application
+FROM base as application
 
 # Copy backend source code
 COPY backend/ ./backend/

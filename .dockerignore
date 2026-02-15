@@ -14,16 +14,14 @@ venv/
 ENV/
 env/
 
-# Node (entire frontend directory - using static files instead)
-frontend/
+# Node build artifacts (but allow source files)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .next/
 out/
-package.json
-package-lock.json
+# Note: package.json and package-lock.json are needed for builds
 
 # Database files (will be recreated or use persistent volume)
 *.db

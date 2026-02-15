@@ -1,0 +1,51 @@
+# Core Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# CORS and middleware
+python-dotenv>=1.0.0
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.12.0
+
+# Redis and Caching
+redis>=5.0.0
+
+# Authentication
+pyjwt>=2.8.0
+bcrypt>=4.1.0
+
+# HTTP Client
+httpx>=0.25.0
+
+# Vector Database (Pinecone)
+pinecone-client>=2.2.0
+
+# PDF Processing
+pdfplumber>=0.10.0
+
+# AI/ML Libraries (PyTorch installed separately via install_pytorch.sh)
+# torch - installed via install_pytorch.sh
+# torchaudio - installed via install_pytorch.sh
+transformers>=4.35.0
+
+# Text-to-Speech (install without strict version requirements)
+TTS>=0.20.0
+# gruut and bnnumerizer will be installed as TTS dependencies
+
+# Audio Processing
+pydub>=0.25.0
+soundfile>=0.12.0
+librosa>=0.10.0
+numpy>=1.24.0,<2.0.0
+
+# Embeddings (for LTM/RAG)
+sentence-transformers>=2.2.0
+
+# Utilities
+python-dateutil>=2.8.0
+
