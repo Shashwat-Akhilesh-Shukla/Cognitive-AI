@@ -31,20 +31,25 @@ pdfplumber>=0.10.0
 # AI/ML Libraries (PyTorch installed separately via install_pytorch.sh)
 # torch - installed via install_pytorch.sh
 # torchaudio - installed via install_pytorch.sh
-transformers>=4.35.0
 
-# Text-to-Speech (install without strict version requirements)
-TTS>=0.20.0
-# gruut and bnnumerizer will be installed as TTS dependencies
+# ============================================
+# GPU/ML PACKAGES (OPTIONAL - Uncomment if you have GPU and need voice/ML features)
+# ============================================
+# These packages are VERY large and slow to download. Only enable if needed:
+# - transformers: 500MB+ with dependencies (for NLP models)
+# - TTS: 200MB+ with dependencies (for text-to-speech)
+# - sentence-transformers: 300MB+ (for embeddings/RAG)
+# - librosa: 100MB+ (for audio processing)
+#
+# transformers>=4.35.0
+# TTS>=0.20.0
+# sentence-transformers>=2.2.0
+# librosa>=0.10.0
 
-# Audio Processing
+# Audio Processing (lightweight, keep these)
 pydub>=0.25.0
 soundfile>=0.12.0
-librosa>=0.10.0
 numpy>=1.24.0,<2.0.0
-
-# Embeddings (for LTM/RAG)
-sentence-transformers>=2.2.0
 
 # Utilities
 python-dateutil>=2.8.0

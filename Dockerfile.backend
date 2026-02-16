@@ -25,10 +25,15 @@ COPY backend/requirements.txt ./backend/
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r backend/requirements.txt
 
-# Install PyTorch conditionally based on GPU availability
-COPY install_pytorch.sh ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    chmod +x install_pytorch.sh && ./install_pytorch.sh
+# ============================================
+# OPTIONAL: Install PyTorch (GPU/CPU)
+# ============================================
+# Uncomment the lines below if you need PyTorch for ML features
+# This adds ~2GB to the image and takes 30+ minutes to download
+#
+# COPY install_pytorch.sh ./
+# RUN --mount=type=cache,target=/root/.cache/pip \
+#     chmod +x install_pytorch.sh && ./install_pytorch.sh
 
 # ============================================
 # Stage 2: Application
