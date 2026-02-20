@@ -33,6 +33,7 @@
 - 🎤 **Real-Time Voice Agent**: Whisper STT + Coqui TTS with WebSocket streaming
 - 👥 **Multi-User System**: JWT authentication with per-user data isolation
 - 📚 **PDF Knowledge Base**: Semantic search over uploaded documents
+- Facial Expressions in real time integrated with text
 - 💬 **Persistent Conversations**: SQLite-backed chat history with conversation management
 - 🚀 **Production-Ready**: Docker deployment, health checks, comprehensive error handling
 
