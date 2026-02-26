@@ -33,8 +33,8 @@
 - 🎤 **Real-Time Voice Agent**: Whisper STT + Coqui TTS with WebSocket streaming
 - 👥 **Multi-User System**: JWT authentication with per-user data isolation
 - 📚 **PDF Knowledge Base**: Semantic search over uploaded documents
-- Facial Expressions in real time integrated with text
-- 💬 **Persistent Conversations**: SQLite-backed chat history with conversation management
+- 😊 Real Time facial expressions integrated with Text mode using Face Api.
+- 💬 **Persistent Conversations**: PostgreSQL-backed chat history with conversation management
 - 🚀 **Production-Ready**: Docker deployment, health checks, comprehensive error handling
 
 ---
@@ -56,7 +56,7 @@ graph TB
     
     subgraph "Authentication"
         JWT[JWT Auth Service]
-        AUTH_DB[(User Database<br/>SQLite)]
+        AUTH_DB[(User Database<br/>PostgreSQL)]
     end
     
     subgraph "Core Services"
@@ -69,7 +69,7 @@ graph TB
     subgraph "Memory Systems"
         STM[Short-Term Memory<br/>Redis]
         LTM[Long-Term Memory<br/>Pinecone Vector DB]
-        CONV_DB[(Conversations & Messages<br/>SQLite)]
+        CONV_DB[(Conversations & Messages<br/>PostgreSQL)]
     end
     
     subgraph "AI Models"
@@ -296,7 +296,7 @@ erDiagram
 
 ### 4. 💬 Conversation Management
 
-- **Persistent chat history** stored in SQLite
+- **Persistent chat history** stored in PostgreSQL
 - **Features**:
   - Automatic conversation creation
   - Title generation from first message
@@ -344,7 +344,7 @@ erDiagram
 |-----------|-----------|---------|
 | **API Framework** | FastAPI 0.109+ | High-performance async REST API |
 | **Authentication** | JWT + bcrypt | Secure user authentication |
-| **Database** | SQLite (WAL mode) | User data, conversations, messages |
+| **Database** | PostgreSQL (WAL mode) | User data, conversations, messages |
 | **Short-Term Memory** | Redis 7.0+ | Ephemeral session context |
 | **Long-Term Memory** | Pinecone Serverless | Vector database for semantic search |
 | **Embeddings** | Jina AI API | 768-dim text embeddings |
@@ -861,7 +861,7 @@ VOICE_ENABLED=true
 
 #### Database Persistence
 
-⚠️ **Important**: SQLite is ephemeral in Docker by default.
+⚠️ **Important**: PostgreSQL is ephemeral in Docker by default.
 
 **Options**:
 - **Persistent Disk** (Recommended): Enable Render's persistent disk (paid plans)
@@ -879,7 +879,7 @@ AI-Therapist/
 ├── backend/
 │   ├── main.py                    # FastAPI application
 │   ├── auth.py                    # Authentication service
-│   ├── database.py                # SQLite database layer
+│   ├── database.py                # PostgreSQL database layer
 │   ├── conversations.py           # Conversation manager
 │   ├── reasoning.py               # Cognitive reasoning engine
 │   ├── pdf_loader.py              # PDF processing
