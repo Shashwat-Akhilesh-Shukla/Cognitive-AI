@@ -370,15 +370,37 @@ async def health_check():
             
     health_status["services"]["pinecone"] = pinecone_health
 
-    # Perplexity health check
-    perplexity_health = {"available": reasoning_engine is not None and reasoning_engine.perplexity_api_key, "status": "unknown"}
+    # Perplexity health check — use a real minimal POST (HEAD returns 405)
+    api_key = (reasoning_engine.perplexity_api_key if reasoning_engine else None) or os.getenv("PERPLEXITY_API_KEY", "")
+    perplexity_health = {"available": bool(api_key), "status": "unknown"}
     if perplexity_health["available"]:
         try:
             import httpx
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.head("https://api.perplexity.ai/chat/completions", headers={"Authorization": f"Bearer {reasoning_engine.perplexity_api_key}"})
-                
-                perplexity_health["status"] = "ok" if resp.status_code < 500 else "server_error"
+            with httpx.Client(timeout=8.0) as client:
+                resp = client.post(
+                    "https://api.perplexity.ai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "sonar",
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1
+                    }
+                )
+                if resp.status_code == 200:
+                    perplexity_health["status"] = "ok"
+                elif resp.status_code == 401:
+                    perplexity_health["status"] = "unauthorized — check API key"
+                    health_status["status"] = "degraded"
+                elif resp.status_code == 429:
+                    perplexity_health["status"] = "ok (rate_limited)"
+                elif resp.status_code >= 500:
+                    perplexity_health["status"] = f"server_error ({resp.status_code})"
+                    health_status["status"] = "degraded"
+                else:
+                    perplexity_health["status"] = f"unexpected ({resp.status_code})"
         except Exception as e:
             perplexity_health["status"] = f"unreachable: {str(e)}"
             health_status["status"] = "degraded"
@@ -398,6 +420,76 @@ async def health_check():
     return health_status
 
 
+@app.get("/test-perplexity")
+async def test_perplexity():
+    """
+    Test the Perplexity API connection by making a real minimal call.
+    Returns detailed success/error info without requiring authentication.
+    """
+    import httpx
+
+    api_key = (reasoning_engine.perplexity_api_key if reasoning_engine else None) or os.getenv("PERPLEXITY_API_KEY", "")
+
+    if not api_key:
+        raise HTTPException(status_code=503, detail="PERPLEXITY_API_KEY not configured")
+
+    # Log the first/last 6 chars so we can verify the key loaded correctly
+    key_preview = f"{api_key[:10]}...{api_key[-6:]}" if len(api_key) > 16 else "<too short>"
+    logger.info(f"Testing Perplexity with key preview: {key_preview}")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "sonar",
+                    "messages": [{"role": "user", "content": "Reply with just the word: OK"}],
+                    "max_tokens": 5
+                }
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            answer = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            return {
+                "success": True,
+                "status_code": 200,
+                "model": data.get("model"),
+                "response": answer,
+                "key_preview": key_preview,
+                "message": "Perplexity API is working correctly"
+            }
+        elif resp.status_code == 401:
+            return {
+                "success": False,
+                "status_code": 401,
+                "key_preview": key_preview,
+                "error": "Unauthorized — API key is invalid or expired",
+                "perplexity_message": resp.text
+            }
+        elif resp.status_code == 429:
+            return {
+                "success": True,
+                "status_code": 429,
+                "key_preview": key_preview,
+                "message": "API key is valid but rate limited"
+            }
+        else:
+            return {
+                "success": False,
+                "status_code": resp.status_code,
+                "key_preview": key_preview,
+                "error": resp.text
+            }
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Perplexity API request timed out")
+    except Exception as e:
+        logger.error(f"Perplexity test failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Perplexity API test failed: {str(e)}")
 
 
 
