@@ -15,6 +15,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
   const [error, setError] = useState('')
   const [fileInfo, setFileInfo] = useState(null)
   const [isStreaming, setIsStreaming] = useState(false)
+  const [isFocused, setIsFocused] = useState(false)
 
   // Voice mode state
   const [isVoiceMode, setIsVoiceMode] = useState(false)
@@ -677,7 +678,26 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     <main className="chat-main">
 
       <div className="messages" ref={messagesRef}>
+        {current.messages && current.messages.length === 0 && (
+          <div className="welcome-screen">
+            <div className="welcome-orb" />
+            <div className="welcome-text">
+              <h2>I'm here with you</h2>
+              <p>This is a safe space. Share what's on your mind — there's no rush.</p>
+            </div>
+          </div>
+        )}
         {current.messages && current.messages.map(m => <Message key={m.id} m={m} />)}
+        {isStreaming && (
+          <div className="typing-indicator">
+            <div className="ai-avatar">✦</div>
+            <div className="typing-dots">
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+              <span className="typing-dot" />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Voice Mode UI */}
@@ -741,7 +761,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
             </div>
           )}
 
-          <div className="composer">
+          <div className={`composer${isFocused ? ' focused' : ''}`}>
             {/* Attach Files Icon */}
             <label className="composer-icon-btn attach-btn" title="Attach file">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -762,8 +782,10 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
               className="text-input"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Message AI Therapist...'}
+              placeholder={attachingFile ? `Attached: ${attachingFile.name}` : 'Talk to me…'}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
               disabled={isStreaming}
             />
 

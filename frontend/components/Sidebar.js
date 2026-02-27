@@ -92,7 +92,7 @@ export default function Sidebar({ chats, currentChatId, setCurrentChatId, update
       <div className="sidebar-header">
         <h3>CognitiveAI</h3>
         <div className="sidebar-actions">
-          <button onClick={createNew} className="btn">+ New Chat</button>
+          <button onClick={createNew} className="btn">+ New conversation</button>
           <DarkToggle />
         </div>
       </div>
@@ -145,7 +145,7 @@ function ProfileCard({ user, onLogout }) {
             className="btn logout"
             onClick={() => { setOpen(false); onLogout() }}
           >
-            Sign out
+            Leave session
           </button>
         </div>
       )}
