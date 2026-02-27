@@ -678,7 +678,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
     <main className="chat-main">
 
       <div className="messages" ref={messagesRef}>
-        {current.messages && current.messages.length === 0 && (
+        {current.messages && current.messages.length === 0 && !isStreaming && (
           <div className="welcome-screen">
             <div className="welcome-orb" />
             <div className="welcome-text">
@@ -687,10 +687,19 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
             </div>
           </div>
         )}
+        {current.messages && current.messages.length === 0 && isStreaming && (
+          <div className="welcome-screen">
+            <div className="welcome-orb waiting" />
+            <div className="welcome-text">
+              <h2>Listening…</h2>
+              <p>Taking a moment to respond thoughtfully.</p>
+            </div>
+          </div>
+        )}
         {current.messages && current.messages.map(m => <Message key={m.id} m={m} />)}
-        {isStreaming && (
+        {isStreaming && current.messages && current.messages.length > 0 && (
           <div className="typing-indicator">
-            <div className="ai-avatar">✦</div>
+            <div className="orb-mini waiting" aria-hidden="true" />
             <div className="typing-dots">
               <span className="typing-dot" />
               <span className="typing-dot" />
