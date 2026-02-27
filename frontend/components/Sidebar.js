@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Sidebar.js:', BACKEND_URL)
@@ -112,15 +112,58 @@ export default function Sidebar({ chats, currentChatId, setCurrentChatId, update
       </div>
 
       <div className="sidebar-footer">
-        {user && (
-          <div className="user-info">
-            <p className="user-label">Logged in as:</p>
-            <p className="username">{user.username}</p>
-          </div>
-        )}
-        <button onClick={handleLogout} className="btn logout">Logout</button>
+        {user && <ProfileCard user={user} onLogout={handleLogout} />}
       </div>
     </aside>
+  )
+}
+
+function ProfileCard({ user, onLogout }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [open])
+
+  const initials = user.username
+    ? user.username.slice(0, 2).toUpperCase()
+    : '??'
+
+  return (
+    <div className="profile-card-wrapper" ref={ref}>
+      {open && (
+        <div className="profile-dropdown">
+          <button
+            className="btn logout"
+            onClick={() => { setOpen(false); onLogout() }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+      <button
+        className="profile-card"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title="Account options"
+      >
+        <span className="profile-avatar" aria-hidden="true">{initials}</span>
+        <div className="profile-info">
+          <span className="profile-name">{user.username}</span>
+          <span className="profile-role">Your account</span>
+        </div>
+        <span className="profile-chevron" aria-hidden="true">{open ? '▴' : '▾'}</span>
+      </button>
+    </div>
   )
 }
 
@@ -156,4 +199,3 @@ function DarkToggle() {
   const icon = !mounted ? '◐' : (dark ? '☀️' : '🌙')
   return <button className="btn toggle" onClick={toggle} title={dark ? 'Light mode' : 'Dark mode'}>{icon}</button>
 }
-
