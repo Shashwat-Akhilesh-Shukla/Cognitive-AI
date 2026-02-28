@@ -9,7 +9,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [detectionActive, setDetectionActive] = useState(false)
-  const [isMinimized, setIsMinimized] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(false)
   const detectionIntervalRef = useRef(null)
   const faceApiRef = useRef(null)
 
@@ -17,7 +17,6 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
   const stopCamera = () => {
     console.log('[EmotionDetection] Stopping camera...')
 
-    // Stop all tracks in the stream
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => {
         track.stop()
@@ -26,42 +25,36 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
       streamRef.current = null
     }
 
-    // Also check video element
     if (videoRef.current && videoRef.current.srcObject) {
       videoRef.current.srcObject.getTracks().forEach(track => {
         track.stop()
-        console.log('[EmotionDetection] Stopped video track:', track.kind)
       })
       videoRef.current.srcObject = null
     }
 
-    // Clear detection interval
     if (detectionIntervalRef.current) {
       clearInterval(detectionIntervalRef.current)
       detectionIntervalRef.current = null
     }
 
     setDetectionActive(false)
-    console.log('[EmotionDetection] Camera stopped successfully')
   }
 
-  // Enhanced close handler
   const handleClose = () => {
     stopCamera()
-    setIsMinimized(false)
+    setIsCollapsed(false)
     onClose()
   }
 
+  // Load face-api once on mount
   useEffect(() => {
     const loadFaceAPI = async () => {
       try {
-        // Load face-api from CDN
         const script = document.createElement('script')
         script.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.min.js'
         script.async = true
         script.onload = async () => {
           console.log('✓ Face API loaded from CDN')
-          // Load models
           const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/'
           if (window.faceapi) {
             await window.faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
@@ -86,7 +79,7 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
     loadFaceAPI()
   }, [])
 
-  // Initialize webcam
+  // Initialize webcam when sidebar opens
   useEffect(() => {
     if (!isOpen) {
       stopCamera()
@@ -117,14 +110,13 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
 
     initWebcam()
 
-    // Cleanup when component unmounts or isOpen changes
     return () => {
       stopCamera()
-      setIsMinimized(false)
+      setIsCollapsed(false)
     }
   }, [isOpen])
 
-  // Real-time emotion detection
+  // Real-time emotion detection loop
   useEffect(() => {
     if (!detectionActive || !videoRef.current || loading) return
 
@@ -135,20 +127,15 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
         const video = videoRef.current
         const canvas = canvasRef.current
 
-        // Match canvas size to video
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
 
-        if (!faceApiRef.current) {
-          console.warn('Face API not yet loaded')
-          return
-        }
+        if (!faceApiRef.current) return
 
         const detections = await faceApiRef.current
           .detectAllFaces(video, new faceApiRef.current.TinyFaceDetectorOptions())
           .withFaceExpressions()
 
-        // Clear canvas
         const ctx = canvas.getContext('2d')
         ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -156,31 +143,21 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
           const detection = detections[0]
           const expressions = detection.expressions
 
-          // Find emotion with highest confidence
           let maxEmotion = 'neutral'
           let maxConfidence = 0
 
-          const emotionLabels = [
-            'angry',
-            'disgusted',
-            'fearful',
-            'happy',
-            'neutral',
-            'sad',
-            'surprised'
-          ]
+          const emotionLabels = ['angry', 'disgusted', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
 
-          emotionLabels.forEach(emotion => {
-            if (expressions[emotion] > maxConfidence) {
-              maxConfidence = expressions[emotion]
-              maxEmotion = emotion
+          emotionLabels.forEach(em => {
+            if (expressions[em] > maxConfidence) {
+              maxConfidence = expressions[em]
+              maxEmotion = em
             }
           })
 
           setEmotion(maxEmotion.charAt(0).toUpperCase() + maxEmotion.slice(1))
           setConfidence((maxConfidence * 100).toFixed(1))
 
-          // Send emotion data to parent component
           if (onEmotionDetected) {
             onEmotionDetected({
               emotion: maxEmotion,
@@ -189,19 +166,18 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
             })
           }
 
-          // Draw face detection box
+          // Draw bounding box + label
           const box = detection.detection.box
-          ctx.strokeStyle = '#00ff00'
+          ctx.strokeStyle = 'rgba(120, 120, 255, 0.85)'
           ctx.lineWidth = 2
           ctx.strokeRect(box.x, box.y, box.width, box.height)
 
-          // Draw emotion text
-          ctx.fillStyle = '#00ff00'
-          ctx.font = '18px Arial'
+          ctx.fillStyle = 'rgba(120, 120, 255, 0.9)'
+          ctx.font = 'bold 14px Inter, Arial, sans-serif'
           ctx.fillText(
-            `${maxEmotion.toUpperCase()}: ${(maxConfidence * 100).toFixed(1)}%`,
+            `${maxEmotion.toUpperCase()} ${(maxConfidence * 100).toFixed(0)}%`,
             box.x,
-            box.y - 10
+            box.y > 18 ? box.y - 6 : box.y + box.height + 18
           )
         } else {
           setEmotion('No face detected')
@@ -212,7 +188,6 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
       }
     }
 
-    // Run detection every 100ms (10 FPS for performance)
     detectionIntervalRef.current = setInterval(detectEmotions, 100)
 
     return () => {
@@ -222,339 +197,305 @@ export default function EmotionDetection({ isOpen, onClose, onEmotionDetected })
     }
   }, [detectionActive, loading, onEmotionDetected])
 
-  // Handle video playback when minimized/expanded
+  // Pause / resume video on collapse
   useEffect(() => {
     if (!videoRef.current) return
 
-    if (!isMinimized && detectionActive) {
-      // When expanded, ensure video is playing and reattach stream if needed
+    if (!isCollapsed && detectionActive) {
       setTimeout(() => {
         if (videoRef.current && streamRef.current) {
-          // Reattach stream in case it was detached
           if (!videoRef.current.srcObject || videoRef.current.srcObject !== streamRef.current) {
             videoRef.current.srcObject = streamRef.current
           }
-          videoRef.current.play().catch(err => {
-            console.warn('Could not play video:', err)
-          })
+          videoRef.current.play().catch(err => console.warn('Could not play video:', err))
         }
       }, 50)
-    } else if (isMinimized && videoRef.current) {
-      // Pause video when minimizing (don't stop stream)
-      try {
-        videoRef.current.pause()
-      } catch (err) {
-        console.warn('Could not pause video:', err)
-      }
+    } else if (isCollapsed && videoRef.current) {
+      try { videoRef.current.pause() } catch (err) { }
     }
-  }, [isMinimized, detectionActive])
+  }, [isCollapsed, detectionActive])
 
-  if (!isOpen) return null
+  // Emotion-to-emoji map for a nicer display
+  const emotionEmoji = {
+    Happy: '😊', Sad: '😢', Angry: '😠', Fearful: '😨',
+    Disgusted: '🤢', Surprised: '😲', Neutral: '😐',
+    'No face detected': '🔍', Initializing: '⏳'
+  }
+
+  const displayEmotion = emotion || 'Initializing...'
+  const emoji = emotionEmoji[emotion] || '🎭'
 
   return (
-    <div className="emotion-detection-overlay">
-      <div className={`emotion-detection-modal ${isMinimized ? 'minimized' : ''}`}>
-        <div className="emotion-detection-header">
-          <h2>Real-Time Emotion Detection</h2>
-          <div className="header-buttons">
+    <>
+      {/* Sidebar panel — slides in from the right */}
+      <aside className={`emotion-sidebar ${isOpen ? 'open' : ''} ${isCollapsed ? 'collapsed' : ''}`}>
+        {/* Header */}
+        <div className="emo-sidebar-header">
+          <div className="emo-sidebar-title">
+            <span className="emo-icon">🎭</span>
+            {!isCollapsed && <span>Emotion Lens</span>}
+          </div>
+          <div className="emo-sidebar-controls">
             <button
-              className="minimize-button"
-              onClick={() => setIsMinimized(!isMinimized)}
-              title={isMinimized ? 'Expand' : 'Collapse'}
+              className="emo-ctrl-btn"
+              onClick={() => setIsCollapsed(c => !c)}
+              title={isCollapsed ? 'Expand' : 'Collapse'}
             >
-              {isMinimized ? '▲' : '▼'}
+              {isCollapsed ? '«' : '»'}
             </button>
-            <button className="close-button" onClick={handleClose}>×</button>
+            <button
+              className="emo-ctrl-btn close"
+              onClick={handleClose}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
-        {error && !isMinimized && <div className="emotion-error">{error}</div>}
+        {/* Body — hidden in collapsed state */}
+        {!isCollapsed && (
+          <div className="emo-sidebar-body">
+            {error && <div className="emo-error">{error}</div>}
+            {loading && !error && <div className="emo-loading">Loading models…</div>}
 
-        {loading && !isMinimized && <div className="emotion-loading">Loading emotion detection models...</div>}
+            {/* Video feed */}
+            <div className="emo-video-wrap">
+              <video
+                ref={videoRef}
+                className="emo-video"
+                playsInline
+                style={{ transform: 'scaleX(-1)' }}
+              />
+              <canvas ref={canvasRef} className="emo-canvas" />
+            </div>
 
-        {/* Video always in DOM, but hidden when minimized */}
-        <div className={`emotion-detection-container ${isMinimized ? 'minimized-content' : ''}`}>
-          <div className="video-wrapper">
-            <video
-              ref={videoRef}
-              className="emotion-video"
-              playsInline
-              style={{ transform: 'scaleX(-1)' }}
-            />
-            <canvas ref={canvasRef} className="emotion-canvas" />
-          </div>
-
-          <div className="emotion-info">
-            <div className="emotion-display">
-              <div className="emotion-label">Detected Emotion:</div>
-              <div className="emotion-value">
-                {emotion || 'Initializing...'}
+            {/* Current emotion badge */}
+            <div className="emo-badge">
+              <span className="emo-badge-emoji">{emoji}</span>
+              <div className="emo-badge-info">
+                <span className="emo-badge-label">Detected</span>
+                <span className="emo-badge-value">{displayEmotion}</span>
+                {confidence > 0 && (
+                  <span className="emo-badge-conf">{confidence}% confident</span>
+                )}
               </div>
-              {confidence > 0 && (
-                <div className="emotion-confidence">
-                  Confidence: {confidence}%
-                </div>
-              )}
             </div>
 
-            <div className="emotion-instructions">
-              <p>📷 Ensure good lighting</p>
-              <p>😊 Position your face in the center</p>
-              <p>⏱️ Real-time emotion analysis active</p>
-            </div>
+            {/* Tips */}
+            <ul className="emo-tips">
+              <li>📷 Good lighting helps</li>
+              <li>😊 Centre your face</li>
+              <li>⏱ Continuous analysis</li>
+            </ul>
           </div>
-        </div>
+        )}
+      </aside>
 
-        <div className={`emotion-detection-footer ${isMinimized ? 'minimized-content' : ''}`}>
-          <button className="emotion-close-btn" onClick={handleClose}>
-            Close
-          </button>
-        </div>
-
-        <style jsx>{`
-        .emotion-detection-overlay {
+      {/* Scoped styles */}
+      <style>{`
+        /* ===== Emotion Sidebar ===== */
+        .emotion-sidebar {
           position: fixed;
           top: 0;
-          left: 0;
           right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-        }
-
-        .emotion-detection-modal {
-          background: white;
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-          max-width: 800px;
-          width: 90%;
-          overflow: hidden;
-          max-height: 90vh;
+          height: 100vh;
+          width: 320px;
+          background: var(--sidebar-bg, #18181b);
+          border-left: 1px solid var(--border, rgba(255,255,255,0.08));
           display: flex;
           flex-direction: column;
-          transition: none;
+          z-index: 500;
+          transform: translateX(100%);
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                      width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: -4px 0 32px rgba(0,0,0,0.4);
+          overflow: hidden;
         }
 
-        .emotion-detection-modal.minimized {
-          /* Keep modal height when minimized, only hide content */
-          max-height: 60px;
+        .emotion-sidebar.open {
+          transform: translateX(0);
         }
 
-        .emotion-detection-header {
+        .emotion-sidebar.collapsed {
+          width: 56px;
+        }
+
+        /* Header */
+        .emo-sidebar-header {
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          padding: 16px 20px;
+          justify-content: space-between;
+          padding: 14px 12px;
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
+          flex-shrink: 0;
+          gap: 8px;
+          min-height: 52px;
+        }
+
+        .emo-sidebar-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 600;
+          color: #fff;
+          font-size: 15px;
+          white-space: nowrap;
+          overflow: hidden;
+        }
+
+        .emo-icon {
+          font-size: 18px;
           flex-shrink: 0;
         }
 
-        .emotion-detection-header h2 {
-          margin: 0;
-          font-size: 20px;
-          flex: 1;
-        }
-
-        .header-buttons {
+        .emo-sidebar-controls {
           display: flex;
-          gap: 8px;
+          align-items: center;
+          gap: 4px;
+          flex-shrink: 0;
         }
 
-        .minimize-button {
-          background: rgba(255, 255, 255, 0.2);
+        .emo-ctrl-btn {
+          background: rgba(255,255,255,0.18);
           border: none;
-          color: white;
-          font-size: 16px;
+          color: #fff;
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
           cursor: pointer;
-          padding: 6px 10px;
-          border-radius: 4px;
-          transition: background 0.2s;
-        }
-
-        .minimize-button:hover {
-          background: rgba(255, 255, 255, 0.3);
-        }
-
-        .close-button {
-          background: rgba(255, 255, 255, 0.2);
-          border: none;
-          color: white;
-          font-size: 24px;
-          cursor: pointer;
-          padding: 4px 8px;
-          border-radius: 4px;
-          width: auto;
-          height: auto;
           display: flex;
           align-items: center;
           justify-content: center;
+          font-size: 14px;
           transition: background 0.2s;
+          flex-shrink: 0;
         }
 
-        .close-button:hover {
-          background: rgba(255, 255, 255, 0.3);
+        .emo-ctrl-btn:hover {
+          background: rgba(255,255,255,0.32);
         }
 
-        .emotion-detection-container {
+        .emo-ctrl-btn.close:hover {
+          background: rgba(255, 80, 80, 0.55);
+        }
+
+        /* Body */
+        .emo-sidebar-body {
+          flex: 1;
+          overflow-y: auto;
           display: flex;
-          gap: 20px;
-          padding: 20px;
+          flex-direction: column;
+          gap: 16px;
+          padding: 16px;
         }
 
-        .emotion-detection-container.minimized-content {
-          /* Hidden when minimized, but keep in DOM */
-          visibility: hidden;
-          height: 0;
-          padding: 0;
-          gap: 0;
-          overflow: hidden;
-        }
-
-        .video-wrapper {
+        /* Video */
+        .emo-video-wrap {
           position: relative;
-          flex: 1;
+          width: 100%;
           aspect-ratio: 4/3;
+          border-radius: 10px;
           overflow: hidden;
-          border-radius: 8px;
           background: #000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 300px;
+          flex-shrink: 0;
         }
 
-        .emotion-video {
+        .emo-video {
           width: 100%;
           height: 100%;
           object-fit: cover;
           display: block;
-          background: #000;
         }
 
-        .emotion-canvas {
+        .emo-canvas {
           position: absolute;
-          top: 0;
-          left: 0;
+          inset: 0;
           width: 100%;
           height: 100%;
         }
 
-        .emotion-info {
-          flex: 0 0 250px;
+        /* Emotion badge */
+        .emo-badge {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 14px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 10px;
+        }
+
+        .emo-badge-emoji {
+          font-size: 32px;
+          flex-shrink: 0;
+        }
+
+        .emo-badge-info {
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          gap: 20px;
+          gap: 2px;
+          min-width: 0;
         }
 
-        .emotion-display {
-          background: #f5f5f5;
-          padding: 16px;
-          border-radius: 8px;
-          text-align: center;
-        }
-
-        .emotion-label {
-          font-size: 12px;
-          color: #666;
+        .emo-badge-label {
+          font-size: 10px;
           text-transform: uppercase;
-          letter-spacing: 1px;
-          margin-bottom: 8px;
+          letter-spacing: 0.08em;
+          color: var(--muted, rgba(255,255,255,0.45));
         }
 
-        .emotion-value {
-          font-size: 28px;
-          font-weight: bold;
-          color: #667eea;
-          margin-bottom: 8px;
+        .emo-badge-value {
+          font-size: 18px;
+          font-weight: 700;
+          color: var(--fg, #f0f0f0);
+          line-height: 1.1;
         }
 
-        .emotion-confidence {
-          font-size: 14px;
-          color: #999;
-        }
-
-        .emotion-instructions {
-          background: #f0f8ff;
-          padding: 12px;
-          border-radius: 8px;
+        .emo-badge-conf {
           font-size: 12px;
-          line-height: 1.8;
-          color: #555;
+          color: #667eea;
         }
 
-        .emotion-instructions p {
-          margin: 4px 0;
-        }
-
-        .emotion-error {
-          background: #fee;
-          color: #c33;
-          padding: 12px;
-          margin: 0;
-          text-align: center;
-          border-bottom: 1px solid #fcc;
-        }
-
-        .emotion-loading {
-          padding: 40px;
-          text-align: center;
-          color: #999;
-          font-size: 14px;
-        }
-
-        .emotion-detection-footer {
-          padding: 16px 20px;
-          background: #f9f9f9;
-          border-top: 1px solid #eee;
-          display: flex;
-          justify-content: flex-end;
-          gap: 10px;
-        }
-
-        .emotion-detection-footer.minimized-content {
-          /* Hide but keep in DOM */
-          visibility: hidden;
-          height: 0;
+        /* Tips */
+        .emo-tips {
+          list-style: none;
           padding: 0;
-          border: none;
-          gap: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
         }
 
-        .emotion-close-btn {
-          background: #667eea;
-          color: white;
-          border: none;
-          padding: 10px 20px;
-          border-radius: 6px;
-          font-size: 14px;
-          cursor: pointer;
-          transition: background 0.3s;
+        .emo-tips li {
+          font-size: 12px;
+          color: var(--muted, rgba(255,255,255,0.45));
+          padding: 4px 0;
+          border-bottom: 1px solid rgba(255,255,255,0.04);
         }
 
-        .emotion-close-btn:hover {
-          background: #764ba2;
+        .emo-tips li:last-child {
+          border-bottom: none;
         }
 
-        @media (max-width: 600px) {
-          .emotion-detection-container {
-            flex-direction: column;
-          }
+        /* States */
+        .emo-error {
+          background: rgba(220, 50, 50, 0.15);
+          color: #ff8787;
+          border: 1px solid rgba(220, 50, 50, 0.3);
+          border-radius: 8px;
+          padding: 10px 12px;
+          font-size: 13px;
+          line-height: 1.5;
+        }
 
-          .emotion-info {
-            flex: 1;
-          }
-
-          .emotion-value {
-            font-size: 24px;
-          }
+        .emo-loading {
+          color: var(--muted, rgba(255,255,255,0.45));
+          font-size: 13px;
+          text-align: center;
+          padding: 24px 0;
         }
       `}</style>
-      </div>
-    </div>
+    </>
   )
 }

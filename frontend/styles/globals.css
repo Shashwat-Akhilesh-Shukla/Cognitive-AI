@@ -19,6 +19,8 @@
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --sidebar-bg: #18181b;
+  --fg: #f0f0f0;
   color-scheme: dark;
 }
 
@@ -43,6 +45,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --sidebar-bg: #f4f4f5;
+  --fg: #111111;
   color-scheme: light;
 }
 
@@ -396,6 +400,17 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  /* Smooth shift when emotion sidebar is open (320px) or collapsed (56px) */
+  transition: padding-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Push chat content when emotion sidebar is open */
+body:has(.emotion-sidebar.open:not(.collapsed)) .chat-main {
+  padding-right: 320px;
+}
+
+body:has(.emotion-sidebar.open.collapsed) .chat-main {
+  padding-right: 56px;
 }
 
 .messages {
