@@ -21,9 +21,8 @@ WORKDIR /app
 # Copy requirements file first for better layer caching
 COPY backend/requirements.txt ./backend/
 
-# Install Python dependencies with cache mount for faster rebuilds
-RUN --mount=type=cache,id=pip-cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r backend/requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # ============================================
 # OPTIONAL: Install PyTorch (GPU/CPU)
