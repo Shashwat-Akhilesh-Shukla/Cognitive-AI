@@ -1,8 +1,10 @@
-// Static vanilla JS version of CognitiveAI frontend
-// API base URL - uses same origin since backend serves static files
+// CognitiveAI — Static vanilla JS frontend
+// Matches the Next.js frontend design. Voice is disabled on this deployment
+// because loading TTS models would exceed Render free-tier memory limits.
+
 const API_BASE = window.location.origin;
 
-// State management
+// ─── State ────────────────────────────────────────────────────────────────────
 let state = {
   token: null,
   user: null,
@@ -12,57 +14,86 @@ let state = {
   attachingFile: null,
   uploadProgress: 0,
   fileInfo: null,
-  error: ''
+  error: '',
+  isDark: false,
 };
 
-// Utility: Generate unique ID
-function nanoid(length = 10) {
-  return Math.random().toString(36).substring(2, 2 + length) + Date.now().toString(36);
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function nanoid(len = 10) {
+  return Math.random().toString(36).slice(2, 2 + len) + Date.now().toString(36);
 }
 
-// Utility: Render app
+function escapeHtml(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = String(str);
+  return d.innerHTML;
+}
+
+/** Strip internal reasoning / tag artifacts that sometimes appear in LLM output */
+function cleanResponse(text) {
+  if (!text) return text;
+  // Remove common reasoning wrapper tags
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  text = text.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '');
+  text = text.replace(/^---+\s*$/gm, '');
+  return text.trim();
+}
+
+// ─── Dark mode ────────────────────────────────────────────────────────────────
+function applyDarkMode(isDark) {
+  document.documentElement.classList.toggle('light', isDark);
+  state.isDark = isDark;
+}
+
+function toggleDarkMode() {
+  const next = !state.isDark;
+  applyDarkMode(next);
+  try { localStorage.setItem('cognitiveai_dark', String(next)); } catch (_) {}
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
 function render() {
   const app = document.getElementById('app');
-  
   if (!state.token) {
     app.innerHTML = renderAuth();
     attachAuthListeners();
   } else {
     app.innerHTML = renderMain();
     attachMainListeners();
-    scrollMessagesToBottom();
+    scrollToBottom();
   }
 }
 
-// Auth component
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
 function renderAuth() {
   return `
     <div class="auth-container">
       <div class="auth-box">
         <h1 class="auth-title">CognitiveAI</h1>
         <p class="auth-subtitle">Memory-Augmented Intelligence</p>
-        
-        <form id="auth-form" class="auth-form">
+
+        <form id="auth-form" class="auth-form" autocomplete="on">
           <div class="form-group">
             <label for="username">Username</label>
-            <input id="username" type="text" placeholder="Enter username" required minlength="3" maxlength="50">
+            <input id="username" type="text" placeholder="Enter username" required minlength="3" maxlength="50" autocomplete="username">
           </div>
-          
-          <div id="email-group" class="form-group" style="display: none;">
+
+          <div id="email-group" class="form-group" style="display:none">
             <label for="email">Email (optional)</label>
-            <input id="email" type="email" placeholder="Enter email">
+            <input id="email" type="email" placeholder="Enter email" autocomplete="email">
           </div>
-          
+
           <div class="form-group">
             <label for="password">Password</label>
-            <input id="password" type="password" placeholder="Enter password" required minlength="6">
+            <input id="password" type="password" placeholder="Enter password" required minlength="6" autocomplete="current-password">
           </div>
-          
-          <div id="auth-error" class="error-message" style="display: none;"></div>
-          
+
+          <div id="auth-error" class="error-message" style="display:none"></div>
+
           <button type="submit" class="auth-button" id="auth-submit">Login</button>
         </form>
-        
+
         <div class="auth-toggle">
           <p>
             <span id="toggle-text">Don't have an account?</span>
@@ -76,55 +107,56 @@ function renderAuth() {
 
 function attachAuthListeners() {
   let isSignup = false;
-  
   const form = document.getElementById('auth-form');
+  const submitBtn = document.getElementById('auth-submit');
   const toggleBtn = document.getElementById('toggle-mode');
   const toggleText = document.getElementById('toggle-text');
-  const submitBtn = document.getElementById('auth-submit');
   const emailGroup = document.getElementById('email-group');
   const errorDiv = document.getElementById('auth-error');
-  
+
   toggleBtn.addEventListener('click', () => {
     isSignup = !isSignup;
-    emailGroup.style.display = isSignup ? 'block' : 'none';
+    emailGroup.style.display = isSignup ? 'flex' : 'none';
     submitBtn.textContent = isSignup ? 'Sign Up' : 'Login';
     toggleText.textContent = isSignup ? 'Already have an account?' : "Don't have an account?";
     toggleBtn.textContent = isSignup ? 'Login' : 'Sign Up';
     errorDiv.style.display = 'none';
   });
-  
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorDiv.style.display = 'none';
     submitBtn.disabled = true;
     submitBtn.textContent = '...';
-    
-    const username = document.getElementById('username').value;
+
+    const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
-    const email = document.getElementById('email').value;
-    
+    const email = document.getElementById('email')?.value?.trim() || '';
+
     try {
       const endpoint = isSignup ? '/auth/signup' : '/auth/login';
       const payload = { username, password };
       if (isSignup && email) payload.email = email;
-      
+
       const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
-      
+
       const data = await res.json();
-      
+
       if (!res.ok) {
         errorDiv.textContent = data.detail || data.message || 'Authentication failed';
         errorDiv.style.display = 'block';
         return;
       }
-      
+
       if (data.token) {
-        localStorage.setItem('cognitiveai_token', data.token);
-        localStorage.setItem('cognitiveai_user', JSON.stringify(data.user));
+        try {
+          localStorage.setItem('cognitiveai_token', data.token);
+          localStorage.setItem('cognitiveai_user', JSON.stringify(data.user));
+        } catch (_) {}
         state.token = data.token;
         state.user = data.user;
         await loadConversations();
@@ -140,90 +172,193 @@ function attachAuthListeners() {
   });
 }
 
-// Main app component
+// ─── MAIN LAYOUT ──────────────────────────────────────────────────────────────
 function renderMain() {
-  const currentChat = state.chats.find(c => c.id === state.currentChatId) || { id: null, messages: [] };
-  
+  const current = state.chats.find(c => c.id === state.currentChatId) || { id: null, messages: [] };
   return `
     <div class="app-root">
       ${renderSidebar()}
-      ${renderChat(currentChat)}
+      ${renderChat(current)}
     </div>
   `;
 }
 
+// ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function renderSidebar() {
+  const darkIcon = state.isDark ? '☀️' : '🌙';
+  const chats = state.chats.filter(c => !c.archived);
+
+  const chatItems = chats.map(chat => {
+    const isActive = chat.id === state.currentChatId;
+    return `
+      <div class="chat-item ${isActive ? 'active' : ''}" data-chat-id="${escapeHtml(chat.id)}">
+        <span class="chat-title" data-chat-id="${escapeHtml(chat.id)}">${escapeHtml(chat.title)}</span>
+        <div class="chat-item-menu-wrap" data-menu-id="${escapeHtml(chat.id)}">
+          <button class="chat-menu-btn" data-menu-trigger="${escapeHtml(chat.id)}" title="More options" aria-haspopup="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <circle cx="8" cy="2.5" r="1.5"/>
+              <circle cx="8" cy="8" r="1.5"/>
+              <circle cx="8" cy="13.5" r="1.5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const initials = state.user?.username ? state.user.username.slice(0, 2).toUpperCase() : '??';
+
   return `
     <aside class="sidebar">
       <div class="sidebar-header">
         <h3>CognitiveAI</h3>
         <div class="sidebar-actions">
-          <button id="new-chat-btn" class="btn">+ New Chat</button>
-          <button id="dark-toggle" class="btn toggle">🌙</button>
+          <button id="new-chat-btn" class="btn" title="New conversation">+ New</button>
+          <button id="dark-toggle" class="btn toggle" title="Toggle theme">${darkIcon}</button>
         </div>
       </div>
-      
-      <div class="chat-list">
-        ${state.chats.map(chat => `
-          <div class="chat-item ${chat.id === state.currentChatId ? 'active' : ''}" data-chat-id="${chat.id}">
-            <input class="chat-title" value="${escapeHtml(chat.title)}" data-chat-id="${chat.id}">
-            <div class="chat-meta">${chat.messages.length} msgs</div>
-            <button class="btn delete" data-delete-id="${chat.id}">Delete</button>
-          </div>
-        `).join('')}
+
+      <div class="chat-list" id="chat-list">
+        ${chatItems}
       </div>
-      
+
       <div class="sidebar-footer">
         ${state.user ? `
-          <div class="user-info">
-            <p class="user-label">Logged in as:</p>
-            <p class="username">${escapeHtml(state.user.username)}</p>
+          <div class="profile-card-wrapper" id="profile-wrapper">
+            <button class="profile-card" id="profile-btn" aria-haspopup="true" title="Account options">
+              <span class="profile-avatar">${escapeHtml(initials)}</span>
+              <div class="profile-info">
+                <span class="profile-name">${escapeHtml(state.user.username)}</span>
+                <span class="profile-role">Your account</span>
+              </div>
+              <span class="profile-chevron" id="profile-chevron">▾</span>
+            </button>
           </div>
         ` : ''}
-        <button id="logout-btn" class="btn logout">Logout</button>
       </div>
     </aside>
   `;
 }
 
-function renderChat(currentChat) {
+// ─── CHAT AREA ────────────────────────────────────────────────────────────────
+function renderChat(current) {
+  const messages = current.messages || [];
+  const hasMessages = messages.length > 0;
+
+  const messagesHtml = messages.map(m => renderMessage(m)).join('');
+
+  const welcomeHtml = !hasMessages ? `
+    <div class="welcome-screen" id="welcome-screen">
+      <div class="welcome-orb ${state.isStreaming ? 'waiting' : ''}"></div>
+      <div class="welcome-text">
+        <h2>${state.isStreaming ? 'Listening…' : "I'm here with you"}</h2>
+        <p>${state.isStreaming ? 'Taking a moment to respond thoughtfully.' : "This is a safe space. Share what's on your mind — there's no rush."}</p>
+      </div>
+    </div>
+  ` : '';
+
+  const typingHtml = state.isStreaming && hasMessages ? `
+    <div class="typing-indicator" id="typing-indicator">
+      <div class="orb-mini waiting" aria-hidden="true"></div>
+      <div class="typing-dots">
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+        <span class="typing-dot"></span>
+      </div>
+    </div>
+  ` : '';
+
+  const errorHtml = state.error ? `
+    <div class="toast error" id="error-toast">
+      <span>${escapeHtml(state.error)}</span>
+      <button class="btn small" id="dismiss-error">Dismiss</button>
+    </div>
+  ` : '';
+
+  const attachHtml = state.attachingFile ? `
+    <div class="attachment-bar" id="attachment-bar">
+      <div class="progress-circle" id="progress-circle" style="background: conic-gradient(#e0e0e0 ${state.uploadProgress * 3.6}deg, #2a2a2a ${state.uploadProgress * 3.6}deg)">
+        <div class="progress-inner">${state.uploadProgress}%</div>
+      </div>
+      <div class="attachment-name">${escapeHtml(state.attachingFile.name)}</div>
+      <div style="flex:1"></div>
+      <button class="btn small" id="remove-attachment">Remove</button>
+    </div>
+  ` : '';
+
+  const inputPlaceholder = state.attachingFile ? `Attached: ${state.attachingFile.name}` : "Talk to me…";
+  const sendActive = !state.isStreaming ? 'active' : '';
+
   return `
     <main class="chat-main">
       <div class="messages" id="messages-container">
-        ${currentChat.messages.map(m => renderMessage(m)).join('')}
+        ${welcomeHtml}
+        ${messagesHtml}
+        ${typingHtml}
       </div>
-      
-      ${state.attachingFile ? `
-        <div class="attachment-bar">
-          <div class="progress-circle" style="background: conic-gradient(var(--accent) ${state.uploadProgress * 3.6}deg, rgba(255,255,255,0.06) ${state.uploadProgress * 3.6}deg)">
-            <div class="progress-inner">${state.uploadProgress}%</div>
-          </div>
-          <div class="attachment-name">${escapeHtml(state.attachingFile.name)}</div>
-          <div style="flex: 1"></div>
-          <button class="btn small" id="remove-attachment">Remove</button>
+
+      <div class="composer-wrapper">
+        ${errorHtml}
+        ${attachHtml}
+
+        <div class="composer" id="composer">
+          <!-- Attach button -->
+          <label class="composer-icon-btn attach-btn" title="Attach PDF file" id="attach-label">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+            <input type="file" accept="application/pdf" id="file-input" style="display:none">
+          </label>
+
+          <!-- Text input -->
+          <input
+            id="message-input"
+            class="text-input"
+            placeholder="${escapeHtml(inputPlaceholder)}"
+            ${state.isStreaming ? 'disabled' : ''}
+          >
+
+          <!-- Camera / Emotion (non-functional in static) -->
+          <button
+            class="composer-icon-btn camera-btn"
+            title="Emotion detection (unavailable in static mode)"
+            disabled
+            style="opacity:0.25;cursor:not-allowed"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+          </button>
+
+          <!-- Voice button — disabled on Render (memory limits) -->
+          <button
+            class="composer-icon-btn voice-btn"
+            title="Voice unavailable on Render — loading TTS models would exceed free-tier memory limits"
+            disabled
+            style="opacity:0.25;cursor:not-allowed"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </button>
+
+          <!-- Send button -->
+          <button
+            class="composer-icon-btn send-btn ${sendActive}"
+            id="send-btn"
+            title="Send message"
+            ${state.isStreaming ? 'disabled' : ''}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"/>
+              <polyline points="5 12 12 5 19 12"/>
+            </svg>
+          </button>
         </div>
-      ` : ''}
-      
-      <div class="composer">
-        <label class="attach">
-          📎
-          <input type="file" accept="application/pdf" id="file-input">
-        </label>
-        ${state.error ? `
-          <div class="toast error">
-            ${escapeHtml(state.error)}
-            <button class="btn small" id="dismiss-error">Dismiss</button>
-          </div>
-        ` : ''}
-        <input 
-          id="message-input" 
-          class="text-input" 
-          placeholder="${state.attachingFile ? `Attached: ${state.attachingFile.name}` : 'Type a message...'}"
-          ${state.isStreaming ? 'disabled' : ''}
-        >
-        <button class="btn send" id="send-btn" ${state.isStreaming ? 'disabled' : ''}>
-          ${state.isStreaming ? 'Streaming...' : 'Send'}
-        </button>
       </div>
     </main>
   `;
@@ -231,62 +366,35 @@ function renderChat(currentChat) {
 
 function renderMessage(m) {
   const isUser = m.role === 'user';
+  const avatarHtml = !isUser ? `<div class="ai-avatar" aria-hidden="true">✦</div>` : '';
+  const streamingClass = m.streaming ? ' streaming' : '';
+  const fileHtml = m.file ? `<div class="file-meta">File: ${escapeHtml(m.file.filename)} — ${escapeHtml(m.file.uploadStatus || '')}</div>` : '';
+
   return `
-    <div class="message ${isUser ? 'user' : 'ai'}">
-      <div class="bubble">
-        <div class="content">${escapeHtml(m.content)}</div>
-        ${m.file ? `<div class="file-meta">File: ${escapeHtml(m.file.filename)} — ${m.file.uploadStatus || m.file.uploadError || ''}</div>` : ''}
+    <div class="message ${isUser ? 'user' : 'ai'}" data-msg-id="${escapeHtml(m.id)}">
+      ${avatarHtml}
+      <div class="bubble${streamingClass}">
+        <div class="content" id="msg-content-${escapeHtml(m.id)}">${escapeHtml(m.content)}</div>
+        ${fileHtml}
       </div>
     </div>
   `;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
+// ─── ATTACH LISTENERS ─────────────────────────────────────────────────────────
 function attachMainListeners() {
   // New chat
   document.getElementById('new-chat-btn')?.addEventListener('click', createNewChat);
-  
-  // Dark mode toggle
-  document.getElementById('dark-toggle')?.addEventListener('click', toggleDarkMode);
-  
-  // Logout
-  document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
-  
-  // Chat selection
-  document.querySelectorAll('.chat-item').forEach(item => {
-    item.addEventListener('click', (e) => {
-      if (!e.target.classList.contains('btn') && !e.target.classList.contains('chat-title')) {
-        const chatId = item.dataset.chatId;
-        selectChat(chatId);
-      }
-    });
+
+  // Dark toggle
+  document.getElementById('dark-toggle')?.addEventListener('click', () => {
+    toggleDarkMode();
+    render();
   });
-  
-  // Chat title editing
-  document.querySelectorAll('.chat-title').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const chatId = e.target.dataset.chatId;
-      renameChat(chatId, e.target.value);
-    });
-  });
-  
-  // Delete chat
-  document.querySelectorAll('[data-delete-id]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const chatId = btn.dataset.deleteId;
-      deleteChat(chatId);
-    });
-  });
-  
+
   // File input
   document.getElementById('file-input')?.addEventListener('change', handleFileChange);
-  
+
   // Remove attachment
   document.getElementById('remove-attachment')?.addEventListener('click', () => {
     state.attachingFile = null;
@@ -294,42 +402,195 @@ function attachMainListeners() {
     state.fileInfo = null;
     render();
   });
-  
+
   // Dismiss error
   document.getElementById('dismiss-error')?.addEventListener('click', () => {
     state.error = '';
     render();
   });
-  
-  // Message input
-  const messageInput = document.getElementById('message-input');
-  messageInput?.addEventListener('keydown', (e) => {
+
+  // Message input — Enter to send
+  document.getElementById('message-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   });
-  
+
   // Send button
   document.getElementById('send-btn')?.addEventListener('click', sendMessage);
+
+  // Chat selection — click on chat item (not menu area)
+  document.querySelectorAll('.chat-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.chat-item-menu-wrap')) return;
+      selectChat(item.dataset.chatId);
+    });
+  });
+
+  // 3-dot menu triggers
+  document.querySelectorAll('[data-menu-trigger]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const chatId = btn.dataset.menuTrigger;
+      openContextMenu(chatId, btn);
+    });
+  });
+
+  // Profile card
+  const profileBtn = document.getElementById('profile-btn');
+  if (profileBtn) {
+    profileBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleProfileDropdown();
+    });
+  }
+
+  // Close menus on outside click
+  document.addEventListener('click', closeAllMenus, { once: false });
 }
 
-// Load conversations from backend
+// ─── CONTEXT MENU ─────────────────────────────────────────────────────────────
+let openMenuChatId = null;
+
+function openContextMenu(chatId, triggerBtn) {
+  // Close existing
+  closeAllMenus();
+  openMenuChatId = chatId;
+
+  const wrap = document.querySelector(`[data-menu-id="${chatId}"]`);
+  if (!wrap) return;
+  wrap.classList.add('menu-open');
+
+  const menu = document.createElement('div');
+  menu.className = 'chat-context-menu';
+  menu.id = 'active-context-menu';
+  menu.innerHTML = `
+    <button class="ctx-menu-item" id="ctx-rename">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+      Rename
+    </button>
+    <button class="ctx-menu-item" id="ctx-archive">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="21 8 21 21 3 21 3 8"/>
+        <rect x="1" y="3" width="22" height="5"/>
+        <line x1="10" y1="12" x2="14" y2="12"/>
+      </svg>
+      Archive
+    </button>
+    <div class="ctx-menu-divider"></div>
+    <button class="ctx-menu-item danger" id="ctx-delete">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+      Delete
+    </button>
+  `;
+
+  wrap.appendChild(menu);
+
+  document.getElementById('ctx-rename')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeAllMenus();
+    startRename(chatId);
+  });
+
+  document.getElementById('ctx-archive')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeAllMenus();
+    archiveChat(chatId);
+  });
+
+  document.getElementById('ctx-delete')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeAllMenus();
+    deleteChat(chatId);
+  });
+}
+
+function closeAllMenus() {
+  // Remove context menus
+  document.getElementById('active-context-menu')?.remove();
+  document.querySelector('.chat-item-menu-wrap.menu-open')?.classList.remove('menu-open');
+  openMenuChatId = null;
+
+  // Remove profile dropdown if clicking elsewhere
+  const existingDropdown = document.getElementById('profile-dropdown');
+  if (existingDropdown) existingDropdown.remove();
+}
+
+// ─── INLINE RENAME ────────────────────────────────────────────────────────────
+function startRename(chatId) {
+  const chatItem = document.querySelector(`[data-chat-id="${chatId}"].chat-item`);
+  if (!chatItem) return;
+  const titleEl = chatItem.querySelector('.chat-title');
+  if (!titleEl) return;
+
+  const currentTitle = state.chats.find(c => c.id === chatId)?.title || '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-title chat-title-editing';
+  input.value = currentTitle;
+  input.dataset.chatId = chatId;
+
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const trimmed = input.value.trim();
+    if (trimmed && trimmed !== currentTitle) {
+      renameChat(chatId, trimmed);
+    } else {
+      render(); // Revert
+    }
+  }
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = currentTitle; input.blur(); }
+  });
+}
+
+// ─── PROFILE DROPDOWN ─────────────────────────────────────────────────────────
+function toggleProfileDropdown() {
+  const existing = document.getElementById('profile-dropdown');
+  if (existing) { existing.remove(); return; }
+
+  const wrapper = document.getElementById('profile-wrapper');
+  if (!wrapper) return;
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'profile-dropdown';
+  dropdown.id = 'profile-dropdown';
+  dropdown.innerHTML = `<button class="btn logout" id="leave-session-btn">Leave session</button>`;
+  wrapper.appendChild(dropdown);
+
+  document.getElementById('leave-session-btn')?.addEventListener('click', handleLogout);
+
+  // Update chevron
+  const chevron = document.getElementById('profile-chevron');
+  if (chevron) chevron.textContent = '▴';
+}
+
+// ─── CONVERSATIONS ────────────────────────────────────────────────────────────
 async function loadConversations() {
   try {
     const res = await fetch(`${API_BASE}/conversations`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
-    
-    if (!res.ok) {
-      const initial = [{ id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true }];
-      state.chats = initial;
-      state.currentChatId = initial[0].id;
-      return;
-    }
-    
+
+    if (!res.ok) throw new Error('Failed to load');
+
     const data = await res.json();
-    
+
     if (data.conversations && data.conversations.length > 0) {
       state.chats = data.conversations.map(conv => ({
         id: conv.conversation_id,
@@ -337,376 +598,366 @@ async function loadConversations() {
         messages: [],
         messagesLoaded: false,
         created_at: conv.created_at,
-        updated_at: conv.updated_at
+        updated_at: conv.updated_at,
       }));
-      
       state.currentChatId = state.chats[0].id;
       await loadMessages(state.chats[0].id);
     } else {
-      const initial = [{ id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true }];
-      state.chats = initial;
-      state.currentChatId = initial[0].id;
+      createFreshChat();
     }
-  } catch (error) {
-    console.error('Error loading conversations:', error);
-    const initial = [{ id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true }];
-    state.chats = initial;
-    state.currentChatId = initial[0].id;
+  } catch (_) {
+    createFreshChat();
   }
 }
 
-// Load messages for a conversation
-async function loadMessages(conversationId) {
+function createFreshChat() {
+  const c = { id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true };
+  state.chats = [c];
+  state.currentChatId = c.id;
+}
+
+async function loadMessages(conversationId, optionalLatestContent) {
   const chat = state.chats.find(c => c.id === conversationId);
-  if (chat && chat.isTemp) return;
-  
+  if (!chat || chat.isTemp) return;
+
   try {
     const res = await fetch(`${API_BASE}/conversations/${conversationId}/messages`, {
       headers: { 'Authorization': `Bearer ${state.token}` }
     });
-    
+
     if (!res.ok) return;
-    
+
     const data = await res.json();
-    
-    const chatIndex = state.chats.findIndex(c => c.id === conversationId);
-    if (chatIndex !== -1) {
-      state.chats[chatIndex].messages = data.messages.map(m => ({
-        id: m.message_id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp
-      }));
-      state.chats[chatIndex].messagesLoaded = true;
-      render();
+    const chatIdx = state.chats.findIndex(c => c.id === conversationId);
+    if (chatIdx === -1) return;
+
+    let msgs = data.messages.map(m => ({
+      id: m.message_id,
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp,
+    }));
+
+    if (optionalLatestContent) {
+      const last = msgs[msgs.length - 1];
+      if (!last || last.role !== 'ai' || last.content !== optionalLatestContent) {
+        msgs.push({ id: 'ai-fallback-' + nanoid(), role: 'ai', content: optionalLatestContent, timestamp: Date.now() / 1000 });
+      }
     }
-  } catch (error) {
-    console.error('Error loading messages:', error);
-  }
+
+    state.chats[chatIdx].messages = msgs;
+    state.chats[chatIdx].messagesLoaded = true;
+    render();
+  } catch (_) {}
 }
 
-// Create new chat
+// ─── CHAT ACTIONS ─────────────────────────────────────────────────────────────
 function createNewChat() {
-  const newChat = {
-    id: 'temp-' + nanoid(6),
-    title: 'New chat',
-    messages: [],
-    isTemp: true
-  };
-  state.chats.unshift(newChat);
-  state.currentChatId = newChat.id;
+  const c = { id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true };
+  state.chats.unshift(c);
+  state.currentChatId = c.id;
   render();
 }
 
-// Select chat
 async function selectChat(chatId) {
+  if (chatId === state.currentChatId) return;
   state.currentChatId = chatId;
   const chat = state.chats.find(c => c.id === chatId);
   if (chat && !chat.isTemp && !chat.messagesLoaded) {
     await loadMessages(chatId);
+  } else {
+    render();
+  }
+}
+
+async function renameChat(chatId, title) {
+  const idx = state.chats.findIndex(c => c.id === chatId);
+  if (idx === -1) return;
+  state.chats[idx].title = title;
+
+  if (!state.chats[idx].isTemp) {
+    try {
+      await fetch(`${API_BASE}/conversations/${chatId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` },
+        body: JSON.stringify({ title }),
+      });
+    } catch (_) {}
   }
   render();
 }
 
-// Rename chat
-async function renameChat(chatId, title) {
-  const chatIndex = state.chats.findIndex(c => c.id === chatId);
-  if (chatIndex !== -1) {
-    state.chats[chatIndex].title = title;
-    
-    const chat = state.chats[chatIndex];
-    if (!chat.isTemp) {
-      try {
-        await fetch(`${API_BASE}/conversations/${chatId}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${state.token}`
-          },
-          body: JSON.stringify({ title })
-        });
-      } catch (e) {
-        console.error('Failed to update title:', e);
-      }
-    }
-  }
-}
-
-// Delete chat
 async function deleteChat(chatId) {
   const chat = state.chats.find(c => c.id === chatId);
   if (chat && !chat.isTemp) {
     try {
       await fetch(`${API_BASE}/conversations/${chatId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${state.token}` }
+        headers: { 'Authorization': `Bearer ${state.token}` },
       });
-    } catch (e) {
-      console.error('Failed to delete conversation:', e);
-    }
+    } catch (_) {}
   }
-  
+
   state.chats = state.chats.filter(c => c.id !== chatId);
-  
+
   if (state.chats.length === 0) {
-    const fresh = { id: 'temp-' + nanoid(6), title: 'New chat', messages: [], isTemp: true };
-    state.chats = [fresh];
-    state.currentChatId = fresh.id;
+    createFreshChat();
   } else if (chatId === state.currentChatId) {
     state.currentChatId = state.chats[0].id;
   }
-  
   render();
 }
 
-// Handle file change
-async function handleFileChange(e) {
+function archiveChat(chatId) {
+  const idx = state.chats.findIndex(c => c.id === chatId);
+  if (idx !== -1) state.chats[idx].archived = true;
+  if (chatId === state.currentChatId) {
+    const visible = state.chats.find(c => !c.archived);
+    if (visible) state.currentChatId = visible.id;
+    else createFreshChat();
+  }
+  render();
+}
+
+// ─── FILE UPLOAD ──────────────────────────────────────────────────────────────
+function handleFileChange(e) {
   const file = e.target.files?.[0];
   if (!file) return;
-  
+
   state.attachingFile = file;
   state.uploadProgress = 0;
+  state.fileInfo = null;
   render();
-  
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE}/upload_pdf`);
-    xhr.setRequestHeader('Authorization', `Bearer ${state.token}`);
-    
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        state.uploadProgress = Math.round((e.loaded / e.total) * 100);
-        render();
-      }
-    };
-    
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `${API_BASE}/upload_pdf`);
+  xhr.setRequestHeader('Authorization', `Bearer ${state.token}`);
+
+  xhr.upload.onprogress = (ev) => {
+    if (ev.lengthComputable) {
+      state.uploadProgress = Math.round((ev.loaded / ev.total) * 100);
+      // Update progress circle without full re-render
+      const circle = document.getElementById('progress-circle');
+      const inner = circle?.querySelector('.progress-inner');
+      if (circle) circle.style.background = `conic-gradient(#e0e0e0 ${state.uploadProgress * 3.6}deg, #2a2a2a ${state.uploadProgress * 3.6}deg)`;
+      if (inner) inner.textContent = state.uploadProgress + '%';
+    }
+  };
+
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
         const data = JSON.parse(xhr.responseText);
-        state.fileInfo = {
-          filename: file.name,
-          uploadStatus: data.status || 'processing',
-          doc_id: data.doc_id || null
-        };
+        state.fileInfo = { filename: file.name, uploadStatus: data.status || 'processing', doc_id: data.doc_id || null };
         state.uploadProgress = 100;
         render();
-      } else {
-        state.error = `Upload failed (${xhr.status})`;
-        state.attachingFile = null;
+      } catch (_) {
+        state.fileInfo = { filename: file.name, uploadStatus: 'processing' };
         render();
       }
-    };
-    
-    xhr.onerror = () => {
-      state.error = 'Network error during upload';
+    } else {
+      state.error = `Upload failed (${xhr.status})`;
       state.attachingFile = null;
       render();
-    };
-    
-    xhr.send(formData);
-  } catch (err) {
-    state.error = 'Upload failed: ' + err.message;
+    }
+  };
+
+  xhr.onerror = () => {
+    state.error = 'Network error during upload';
     state.attachingFile = null;
     render();
-  }
+  };
+
+  const form = new FormData();
+  form.append('file', file);
+  xhr.send(form);
 }
 
-// Send message
+// ─── SEND MESSAGE ─────────────────────────────────────────────────────────────
 async function sendMessage() {
   const input = document.getElementById('message-input');
-  const text = input?.value || '';
-  
+  const text = input?.value?.trim() || '';
+
   if (!text && !state.fileInfo) return;
   if (state.isStreaming) return;
-  
+
   const displayedMessage = text || (state.fileInfo ? `Uploaded file: ${state.fileInfo.filename}` : '');
   const originalChatId = state.currentChatId;
-  
-  // Add user message
+
+  // Add user message to state
   const currentChat = state.chats.find(c => c.id === state.currentChatId);
-  if (currentChat) {
-    currentChat.messages.push({
-      id: 'user-' + nanoid(),
-      role: 'user',
-      content: displayedMessage,
-      file: state.fileInfo
-    });
-  }
-  
-  input.value = '';
-  
-  // Prepare payload
-  const payload = { message: displayedMessage };
-  if (currentChat && !currentChat.isTemp) {
-    payload.conversation_id = state.currentChatId;
-  }
-  if (state.fileInfo?.doc_id) {
-    payload.doc_id = state.fileInfo.doc_id;
-  }
-  
-  // Create AI message placeholder
-  const aiMessageId = 'ai-' + nanoid();
+  if (!currentChat) return;
+
   currentChat.messages.push({
-    id: aiMessageId,
-    role: 'ai',
-    content: '',
-    streaming: true
+    id: 'user-' + nanoid(),
+    role: 'user',
+    content: displayedMessage,
+    file: state.fileInfo,
   });
-  
+
+  if (input) input.value = '';
+  const sentFileInfo = state.fileInfo;
+  state.fileInfo = null;
+  state.attachingFile = null;
+
+  // Payload
+  const payload = { message: displayedMessage };
+  if (!currentChat.isTemp) payload.conversation_id = state.currentChatId;
+  if (sentFileInfo?.doc_id) payload.doc_id = sentFileInfo.doc_id;
+
+  // Add AI placeholder
+  const aiId = 'ai-' + nanoid();
+  currentChat.messages.push({ id: aiId, role: 'ai', content: '', streaming: true });
+
   state.isStreaming = true;
   render();
-  
+
   try {
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.token}`
+        'Authorization': `Bearer ${state.token}`,
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
-    
+
     if (!res.ok) {
-      const errorText = await res.text();
-      const aiMsg = currentChat.messages.find(m => m.id === aiMessageId);
-      if (aiMsg) {
-        aiMsg.content = 'Error: ' + errorText;
-        aiMsg.streaming = false;
-      }
+      const errText = await res.text();
+      const aiMsg = currentChat.messages.find(m => m.id === aiId);
+      if (aiMsg) { aiMsg.content = 'Error: ' + errText; aiMsg.streaming = false; }
       state.isStreaming = false;
       render();
       return;
     }
-    
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let fullResponse = '';
-    
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop();
-      
+
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.type === 'chunk') {
-              fullResponse += data.content;
-              const aiMsg = currentChat.messages.find(m => m.id === aiMessageId);
-              if (aiMsg) {
-                aiMsg.content = fullResponse;
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+
+          if (data.type === 'chunk') {
+            fullResponse += data.content || '';
+            const aiMsg = currentChat.messages.find(m => m.id === aiId);
+            if (aiMsg) {
+              aiMsg.content = fullResponse;
+              // Efficient in-place update instead of full re-render
+              const contentEl = document.getElementById(`msg-content-${aiId}`);
+              if (contentEl) {
+                contentEl.textContent = fullResponse;
+              } else {
                 render();
               }
-            } else if (data.type === 'done') {
-              if (data.conversation_id && data.conversation_id !== originalChatId) {
-                const chatIndex = state.chats.findIndex(c => c.id === originalChatId);
-                if (chatIndex !== -1) {
-                  state.chats[chatIndex].id = data.conversation_id;
-                  state.chats[chatIndex].isTemp = false;
-                  if (state.currentChatId === originalChatId) {
-                    state.currentChatId = data.conversation_id;
-                  }
-                }
+            }
+          } else if (data.type === 'done') {
+            // Handle new conversation ID
+            if (data.conversation_id && data.conversation_id !== originalChatId) {
+              const idx = state.chats.findIndex(c => c.id === originalChatId);
+              if (idx !== -1) {
+                const firstUserMsg = state.chats[idx].messages.find(m => m.role === 'user')?.content || displayedMessage;
+                let newTitle = firstUserMsg.substring(0, 30);
+                if (firstUserMsg.length > 30) newTitle += '…';
+                state.chats[idx].id = data.conversation_id;
+                state.chats[idx].title = newTitle;
+                state.chats[idx].isTemp = false;
+                state.chats[idx].messagesLoaded = true;
               }
-              
-              const aiMsg = currentChat.messages.find(m => m.id === aiMessageId);
-              if (aiMsg) {
-                aiMsg.streaming = false;
-              }
-              
-              if (data.conversation_id) {
-                setTimeout(() => loadMessages(data.conversation_id), 100);
-              }
-            } else if (data.type === 'error') {
-              const aiMsg = currentChat.messages.find(m => m.id === aiMessageId);
-              if (aiMsg) {
-                aiMsg.content = 'Error: ' + data.message;
-                aiMsg.streaming = false;
+              if (state.currentChatId === originalChatId) {
+                state.currentChatId = data.conversation_id;
               }
             }
-          } catch (e) {
-            console.error('Failed to parse SSE data:', e);
+
+            // Finalize AI message
+            const aiMsg = currentChat.messages.find(m => m.id === aiId);
+            if (aiMsg) {
+              aiMsg.content = cleanResponse(fullResponse);
+              aiMsg.streaming = false;
+            }
+
+            // Delayed sync from backend
+            if (data.conversation_id) {
+              setTimeout(() => loadMessages(data.conversation_id, cleanResponse(fullResponse)), 60000);
+            }
+          } else if (data.type === 'error') {
+            const aiMsg = currentChat.messages.find(m => m.id === aiId);
+            if (aiMsg) { aiMsg.content = 'Error: ' + data.message; aiMsg.streaming = false; }
           }
-        }
+        } catch (_) {}
       }
     }
   } catch (err) {
-    console.error('Streaming error:', err);
-    const aiMsg = currentChat.messages.find(m => m.id === aiMessageId);
-    if (aiMsg) {
-      aiMsg.content = 'Error: ' + String(err);
-      aiMsg.streaming = false;
-    }
+    const aiMsg = currentChat.messages.find(m => m.id === aiId);
+    if (aiMsg) { aiMsg.content = 'Error: ' + String(err); aiMsg.streaming = false; }
   } finally {
     state.isStreaming = false;
-    state.attachingFile = null;
-    state.fileInfo = null;
     render();
   }
 }
 
-// Logout
+// ─── LOGOUT ───────────────────────────────────────────────────────────────────
 async function handleLogout() {
   try {
     await fetch(`${API_BASE}/auth/logout`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${state.token}` }
+      headers: { 'Authorization': `Bearer ${state.token}` },
     });
-  } catch (e) {
-    console.error('Logout request failed:', e);
-  }
-  
+  } catch (_) {}
+
   state.token = null;
   state.user = null;
   state.chats = [];
   state.currentChatId = null;
-  localStorage.removeItem('cognitiveai_token');
-  localStorage.removeItem('cognitiveai_user');
+  state.error = '';
+
+  try {
+    localStorage.removeItem('cognitiveai_token');
+    localStorage.removeItem('cognitiveai_user');
+    localStorage.removeItem('cognitiveai_chats');
+  } catch (_) {}
+
   render();
 }
 
-// Dark mode toggle
-function toggleDarkMode() {
-  const isDark = document.documentElement.classList.contains('light');
-  document.documentElement.classList.toggle('light', !isDark);
-  localStorage.setItem('cognitiveai_dark', String(!isDark));
+// ─── SCROLL ───────────────────────────────────────────────────────────────────
+function scrollToBottom() {
+  const el = document.getElementById('messages-container');
+  if (el) el.scrollTop = el.scrollHeight;
 }
 
-// Scroll messages to bottom
-function scrollMessagesToBottom() {
-  const container = document.getElementById('messages-container');
-  if (container) {
-    container.scrollTop = container.scrollHeight;
-  }
-}
-
-// Initialize app
-function init() {
-  // Load saved auth
-  const savedToken = localStorage.getItem('cognitiveai_token');
-  const savedUser = localStorage.getItem('cognitiveai_user');
-  
-  if (savedToken && savedUser) {
-    state.token = savedToken;
-    state.user = JSON.parse(savedUser);
-    loadConversations().then(() => render());
-  } else {
-    render();
-  }
-  
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+async function init() {
   // Load dark mode preference
-  const isDark = localStorage.getItem('cognitiveai_dark') === 'true';
-  document.documentElement.classList.toggle('light', isDark);
+  try {
+    const isDarkSaved = localStorage.getItem('cognitiveai_dark') === 'true';
+    applyDarkMode(isDarkSaved);
+  } catch (_) {}
+
+  // Load auth
+  try {
+    const savedToken = localStorage.getItem('cognitiveai_token');
+    const savedUser = localStorage.getItem('cognitiveai_user');
+
+    if (savedToken && savedUser) {
+      state.token = savedToken;
+      state.user = JSON.parse(savedUser);
+      await loadConversations();
+    }
+  } catch (_) {}
+
+  render();
 }
 
-// Start app
 init();
