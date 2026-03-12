@@ -76,68 +76,80 @@ graph TB
     subgraph "Client Layer"
         WEB[Web Browser]
         VOICE[Voice Interface]
+        CAMERA[Camera / Webcam]
     end
-    
+
+    subgraph "Security Layer"
+        ENCRYPT[Encryption<br/>AES-256 / TLS]
+        DECRYPT[Decryption<br/>AES-256 / TLS]
+    end
+
     subgraph "API Gateway"
         FASTAPI[FastAPI Server<br/>Port 8000]
     end
-    
+
     subgraph "Authentication Layer"
         JWT[JWT Auth Service]
         AUTH_DB[(User Database<br/>SQLite)]
     end
-    
+
+    subgraph "Emotion Recognition"
+        FACE_API[Face API<br/>Emotion Detection]
+        EMOTION_CACHE[Emotion Cache<br/>Redis]
+    end
+
     subgraph "Core Services"
         CHAT[Chat Service]
         VOICE_WS[Voice WebSocket Handler]
         PDF[PDF Loader Service]
         CONV[Conversation Manager]
     end
-    
+
     subgraph "Memory Systems"
         STM[Short-Term Memory<br/>Redis]
         LTM[Long-Term Memory<br/>Pinecone Vector DB]
-        CONV_DB[(Conversations & Messages<br/>SQLite)]
+        CONV_DB[(Conversations and Messages<br/>SQLite)]
     end
-    
+
     subgraph "AI Models"
         WHISPER[Whisper STT<br/>faster-whisper]
         COQUI[Coqui TTS<br/>Tacotron2]
         PERPLEXITY[Perplexity API<br/>LLM Reasoning]
         JINA[Jina Embeddings API<br/>Vector Embeddings]
     end
-    
-    WEB -->|HTTP/REST| FASTAPI
-    VOICE -->|WebSocket| FASTAPI
-    
+
+    WEB -->|HTTPS / Encrypted| ENCRYPT
+    VOICE -->|WSS / Encrypted| ENCRYPT
+    CAMERA -->|Video Frames| FACE_API
+    ENCRYPT --> FASTAPI
+    FASTAPI --> DECRYPT
+    DECRYPT -->|Plaintext Response| WEB
+
     FASTAPI --> JWT
     JWT --> AUTH_DB
-    
+
+    FACE_API -->|Emotion Label| EMOTION_CACHE
+    EMOTION_CACHE -->|Emotion Context| CHAT
+
     FASTAPI --> CHAT
     FASTAPI --> VOICE_WS
     FASTAPI --> PDF
     FASTAPI --> CONV
-    
+
     CHAT --> STM
     CHAT --> LTM
     CHAT --> CONV_DB
     CHAT --> PERPLEXITY
-    
+
     VOICE_WS --> WHISPER
     VOICE_WS --> COQUI
     VOICE_WS --> CHAT
-    
+
     PDF --> LTM
     PDF --> JINA
-    
+
     LTM --> JINA
     CONV --> CONV_DB
-    
-    style FASTAPI fill:#00d4aa
-    style STM fill:#dc382d
-    style LTM fill:#ff6b00
-    style WHISPER fill:#4a90e2
-    style COQUI fill:#4a90e2
 ```
 
 **Figure 1**: High-level system architecture showing the layered design with client interfaces, API gateway, core services, memory systems, and AI model integrations.
@@ -148,47 +160,61 @@ The system implements a microservices-inspired architecture where each component
 
 ```mermaid
 graph LR
+    subgraph "Security"
+        ENCRYPT[Encryption<br/>TLS / AES-256]
+        DECRYPT[Decryption<br/>TLS / AES-256]
+    end
+
     subgraph "Request Processing"
         REQ[Incoming Request]
-        AUTH[Authentication]
+        AUTH[Authentication<br/>JWT Verify]
         ROUTE[Request Routing]
     end
-    
+
+    subgraph "Emotion Recognition"
+        FACE_SVC[Face API Service<br/>Emotion Detection]
+        EMOTION_STORE[Emotion Cache<br/>Redis]
+    end
+
     subgraph "Business Logic"
         CHAT_SVC[Chat Service]
         VOICE_SVC[Voice Service]
         PDF_SVC[PDF Service]
     end
-    
+
     subgraph "Data Layer"
         MEM[Memory Manager]
         DB[Database Manager]
     end
-    
+
     subgraph "External Services"
         AI[AI Services]
     end
-    
+
+    ENCRYPT --> REQ
     REQ --> AUTH
     AUTH --> ROUTE
     ROUTE --> CHAT_SVC
     ROUTE --> VOICE_SVC
     ROUTE --> PDF_SVC
-    
+
+    FACE_SVC -->|Emotion Label| EMOTION_STORE
+    EMOTION_STORE -->|Emotion Context| CHAT_SVC
+    EMOTION_STORE -->|Emotion Context| VOICE_SVC
+
     CHAT_SVC --> MEM
     CHAT_SVC --> DB
     CHAT_SVC --> AI
-    
+
     VOICE_SVC --> MEM
     VOICE_SVC --> DB
     VOICE_SVC --> AI
-    
+
     PDF_SVC --> MEM
     PDF_SVC --> DB
-    
-    style AUTH fill:#ff6b6b
-    style MEM fill:#4ecdc4
-    style AI fill:#95e1d3
+
+    CHAT_SVC --> DECRYPT
+    VOICE_SVC --> DECRYPT
 ```
 
 **Figure 2**: Component interaction model demonstrating request flow through authentication, routing, business logic, and data layers.
@@ -359,15 +385,10 @@ graph TB
     STM --> STM_TTL
     STM --> STM_SIZE
     STM --> STM_ACCESS
-    
+
     LTM --> LTM_PERSIST
     LTM --> LTM_SIZE
     LTM --> LTM_ACCESS
-    
-    style STM fill:#dc382d
-    style LTM fill:#ff6b00
-    style INPUT fill:#4ecdc4
-    style OUTPUT fill:#95e1d3
 ```
 
 **Figure 4**: Dual-memory architecture showing the relationship between short-term and long-term memory systems with their respective characteristics.
@@ -491,38 +512,49 @@ graph LR
     subgraph "Client"
         MIC[Microphone]
         SPEAKER[Speaker]
+        CAMERA[Camera]
     end
-    
+
+    subgraph "Security"
+        WSS[WSS Encryption<br/>TLS / AES-256]
+    end
+
+    subgraph "Emotion Recognition"
+        FACE_API[Face API<br/>Emotion Detection]
+        EMOTION_CACHE[Emotion Cache<br/>Redis]
+    end
+
     subgraph "WebSocket Pipeline"
         WS[WebSocket Handler]
         BUFFER[Audio Buffer]
     end
-    
+
     subgraph "Processing"
-        STT[Whisper STT<br/>Speech→Text]
-        REASON[Reasoning Engine<br/>LLM Processing]
-        TTS[Coqui TTS<br/>Text→Speech]
+        STT[Whisper STT<br/>Speech to Text]
+        REASON[Reasoning Engine<br/>LLM + Emotion Context]
+        TTS[Coqui TTS<br/>Text to Speech]
     end
-    
+
     subgraph "Storage"
         CONV_STORE[(Conversation DB)]
         MEM_STORE[(Memory Systems)]
     end
-    
-    MIC -->|Audio Chunks| WS
+
+    CAMERA -->|Video Frames| FACE_API
+    FACE_API -->|Emotion Label| EMOTION_CACHE
+    EMOTION_CACHE -->|Emotion Context| REASON
+
+    MIC -->|Audio Chunks| WSS
+    WSS -->|Encrypted Audio| WS
     WS --> BUFFER
     BUFFER -->|Complete Audio| STT
     STT -->|Transcript| REASON
     REASON -->|Response Text| TTS
-    TTS -->|Audio| WS
-    WS -->|Audio Stream| SPEAKER
-    
+    TTS -->|Audio| WSS
+    WSS -->|Encrypted Audio Stream| SPEAKER
+
     REASON --> CONV_STORE
     REASON --> MEM_STORE
-    
-    style STT fill:#4a90e2
-    style TTS fill:#4a90e2
-    style REASON fill:#00d4aa
 ```
 
 **Figure 6**: Voice agent pipeline showing bidirectional audio streaming from microphone input through processing to speaker output.
@@ -776,13 +808,6 @@ graph TB
     PROMPT_BUILDER -->|System Prompt + Emotion Note| LLM
     LLM -->|Emotion-Aware Response| RESPONSE_GEN
     RESPONSE_GEN --> EMOTION_AWARE
-    
-    style FACE_DETECT fill:#9b59b6
-    style EMOTION_ANALYSIS fill:#9b59b6
-    style EMOTION_CACHE fill:#dc382d
-    style REASONING fill:#00d4aa
-    style LLM fill:#3498db
-    style EMOTION_AWARE fill:#2ecc71
 ```
 
 **Figure 6.5**: Face API emotion recognition architecture showing real-time facial analysis, emotion caching, and integration with the cognitive reasoning engine for emotion-aware therapeutic responses.
@@ -927,12 +952,6 @@ graph TB
     
     UPDATE --> STM_U
     UPDATE --> LTM_U
-    
-    style PROCESS fill:#4ecdc4
-    style RECALL fill:#ff6b6b
-    style PLAN fill:#ffd93d
-    style GENERATE fill:#95e1d3
-    style UPDATE fill:#6bcf7f
 ```
 
 **Figure 8**: Cognitive loop architecture showing the complete processing cycle from input through recall, planning, generation, and memory updates.
@@ -989,10 +1008,6 @@ graph LR
     PDF_RES --> MERGE
     
     MERGE --> CONTEXT[Unified Context]
-    
-    style QUERY fill:#4ecdc4
-    style MERGE fill:#ffd93d
-    style CONTEXT fill:#95e1d3
 ```
 
 **Figure 9**: Multi-source information retrieval showing parallel queries to STM, LTM, and PDF knowledge bases.
@@ -1138,24 +1153,27 @@ def should_store_in_ltm(message: str) -> bool:
 ```mermaid
 sequenceDiagram
     participant Client
+    participant TLS as TLS Encryption
     participant API
     participant Auth
     participant DB
     participant Redis
-    
-    Client->>API: POST /auth/signup
+
+    Client->>TLS: POST /auth/signup (plaintext over HTTPS)
+    TLS->>API: Decrypted request
     API->>Auth: Validate credentials
     Auth->>Auth: Hash password (bcrypt)
-    Auth->>DB: Store user
+    Auth->>DB: Store user (encrypted at rest)
     Auth->>Auth: Generate JWT
-    Auth->>Client: Return token
-    
-    Client->>API: POST /chat (with JWT)
+    TLS->>Client: Return encrypted token (HTTPS)
+
+    Client->>TLS: POST /chat (JWT in Authorization header)
+    TLS->>API: Decrypted request
     API->>Auth: Verify token
-    Auth->>Auth: Decode & validate
+    Auth->>Auth: Decode and validate JWT
     Auth->>API: Return user_id
     API->>Redis: Access user data
-    API->>Client: Return response
+    TLS->>Client: Return encrypted response
 ```
 
 **Figure 10**: Authentication flow showing user registration and subsequent authenticated requests.
@@ -1206,34 +1224,44 @@ app.add_middleware(
 ```mermaid
 sequenceDiagram
     participant User
+    participant TLS as TLS Encryption
     participant FastAPI
     participant Auth
+    participant FaceAPI as Face API
+    participant EmotionCache as Emotion Cache
     participant STM
     participant LTM
     participant Reasoning
     participant Perplexity
     participant Database
-    
-    User->>FastAPI: POST /chat (with JWT)
+
+    User->>TLS: POST /chat (plaintext + JWT)
+    TLS->>FastAPI: Encrypted request (TLS)
     FastAPI->>Auth: Verify Token
     Auth-->>FastAPI: user_id
-    
+
+    Note over FaceAPI,EmotionCache: Parallel emotion detection
+    FaceAPI->>EmotionCache: Store emotion label (e.g. anxious)
+    FastAPI->>EmotionCache: Fetch current emotion for user_id
+    EmotionCache-->>FastAPI: Emotion context
+
     FastAPI->>STM: Get Recent Context
     STM-->>FastAPI: Recent Memories
-    
+
     FastAPI->>LTM: Semantic Search
     LTM-->>FastAPI: Relevant Long-term Memories
-    
-    FastAPI->>Reasoning: Process Message
-    Reasoning->>Perplexity: Generate Response
+
+    FastAPI->>Reasoning: Process Message + Emotion Context
+    Reasoning->>Perplexity: Generate Emotion-Aware Response
     Perplexity-->>Reasoning: AI Response
     Reasoning-->>FastAPI: Response + Memory Actions
-    
+
     FastAPI->>STM: Store New Context
     FastAPI->>LTM: Store Important Facts
     FastAPI->>Database: Save Message to Conversation
-    
-    FastAPI-->>User: Stream Response
+
+    FastAPI->>TLS: Encrypt response
+    TLS-->>User: Encrypted stream response
 ```
 
 **Figure 11**: Complete request flow for a chat message showing all system interactions from authentication through response generation and memory updates.
@@ -1299,11 +1327,6 @@ graph TB
     EMBED --> STORE
     STORE --> INDEX
     INDEX --> COMPLETE
-    
-    style UPLOAD fill:#4ecdc4
-    style VALIDATE fill:#ffd93d
-    style EMBED fill:#ff6b6b
-    style STORE fill:#95e1d3
 ```
 
 **Figure 13**: PDF processing pipeline from upload through validation, extraction, chunking, embedding generation, and storage.
@@ -1463,10 +1486,6 @@ graph TB
     APP3 --> REDIS
     APP3 --> PINECONE
     APP3 --> DB
-    
-    style LB fill:#ff6b6b
-    style REDIS fill:#dc382d
-    style PINECONE fill:#ff6b00
 ```
 
 **Figure 14**: Production deployment topology showing horizontal scaling with load balancing, shared data layer, and external service integrations.
@@ -1919,11 +1938,6 @@ graph TB
     
     STT --> MODEL_MGR
     TTS --> MODEL_MGR
-    
-    style MAIN fill:#00d4aa
-    style REASON fill:#ffd93d
-    style STM fill:#dc382d
-    style LTM fill:#ff6b00
 ```
 
 **Figure 15**: Component dependency graph showing module relationships and import structure.
@@ -1966,10 +1980,6 @@ graph TB
     
     MODELS --> DISK
     MODELS --> MEMORY
-    
-    style SQLITE fill:#4a90e2
-    style REDIS fill:#dc382d
-    style PINECONE fill:#ff6b00
 ```
 
 **Figure 16**: Data storage architecture showing persistent vs. ephemeral storage and data type distribution.

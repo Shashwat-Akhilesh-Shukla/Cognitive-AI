@@ -15,7 +15,21 @@ let state = {
   uploadProgress: 0,
   fileInfo: null,
   error: '',
+  error: '',
   isDark: false,
+  // Emotion Detection
+  showEmotionDetection: false,
+  emotionModelsLoaded: false,
+  emotionDetectionActive: false,
+  emotionLoading: false,
+  emotionError: '',
+  emotionData: {
+    emotion: 'neutral',
+    confidence: 0,
+  },
+  emotionHistory: [],
+  dominantEmotion: 'neutral',
+  isEmotionCollapsed: false,
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -318,12 +332,12 @@ function renderChat(current) {
             ${state.isStreaming ? 'disabled' : ''}
           >
 
-          <!-- Camera / Emotion (non-functional in static) -->
+          <!-- Camera / Emotion -->
           <button
             class="composer-icon-btn camera-btn"
-            title="Emotion detection (unavailable in static mode)"
-            disabled
-            style="opacity:0.25;cursor:not-allowed"
+            id="camera-btn"
+            title="Detect emotion with camera"
+            ${state.isStreaming ? 'disabled' : ''}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -407,6 +421,17 @@ function attachMainListeners() {
   document.getElementById('dismiss-error')?.addEventListener('click', () => {
     state.error = '';
     render();
+  });
+
+  // Camera button
+  document.getElementById('camera-btn')?.addEventListener('click', () => {
+    state.showEmotionDetection = !state.showEmotionDetection;
+    if (state.showEmotionDetection) {
+      state.isEmotionCollapsed = false;
+      initEmotionDetection();
+    } else {
+      stopEmotionDetection();
+    }
   });
 
   // Message input — Enter to send
@@ -801,7 +826,7 @@ async function sendMessage() {
   state.attachingFile = null;
 
   // Payload
-  const payload = { message: displayedMessage };
+  const payload = { message: displayedMessage, emotion: state.dominantEmotion };
   if (!currentChat.isTemp) payload.conversation_id = state.currentChatId;
   if (sentFileInfo?.doc_id) payload.doc_id = sentFileInfo.doc_id;
 
@@ -961,3 +986,297 @@ async function init() {
 }
 
 init();
+
+// ─── EMOTION DETECTION ─────────────────────────────────────────────────────────
+let emotionContext = {
+  stream: null,
+  detectorInterval: null,
+  faceApiLoaded: false,
+};
+
+async function initEmotionDetection() {
+  renderEmotionSidebar();
+  
+  // Load models if not loaded
+  if (!emotionContext.faceApiLoaded) {
+    state.emotionLoading = true;
+    renderEmotionSidebar();
+    try {
+      if (window.faceapi) {
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+        await window.faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+        await window.faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        emotionContext.faceApiLoaded = true;
+        state.emotionLoading = false;
+        state.emotionModelsLoaded = true;
+      } else {
+        throw new Error('Face API not loaded from CDN');
+      }
+    } catch (e) {
+      state.emotionError = 'Failed to load emotion models';
+      state.emotionLoading = false;
+      renderEmotionSidebar();
+      return;
+    }
+  }
+
+  // Start webcam
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    emotionContext.stream = stream;
+    
+    // In Vanilla JS we must re-attach when we call renderEmotionSidebar()
+    // It's better to update DOM elements manually inside the sidebar.
+    renderEmotionSidebar();
+
+    const videoElement = document.getElementById('emo-video');
+    if (videoElement) {
+      videoElement.srcObject = stream;
+      videoElement.onloadedmetadata = () => {
+        videoElement.play();
+        state.emotionDetectionActive = true;
+        startDetectionLoop(videoElement);
+      };
+    }
+  } catch (err) {
+    state.emotionError = 'Cannot access camera: ' + err.message;
+    renderEmotionSidebar();
+  }
+}
+
+function stopEmotionDetection() {
+  if (emotionContext.stream) {
+    emotionContext.stream.getTracks().forEach(track => track.stop());
+    emotionContext.stream = null;
+  }
+  if (emotionContext.detectorInterval) {
+    clearInterval(emotionContext.detectorInterval);
+    emotionContext.detectorInterval = null;
+  }
+  state.showEmotionDetection = false;
+  state.emotionDetectionActive = false;
+  state.isEmotionCollapsed = false;
+  const container = document.getElementById('emotion-app');
+  if (container) container.innerHTML = '';
+}
+
+function startDetectionLoop(videoElement) {
+  if (emotionContext.detectorInterval) clearInterval(emotionContext.detectorInterval);
+  
+  emotionContext.detectorInterval = setInterval(async () => {
+    if (!state.emotionDetectionActive || !window.faceapi) return;
+    const canvasElement = document.getElementById('emo-canvas');
+    if (!canvasElement || !videoElement) return;
+
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+
+    try {
+      const detections = await window.faceapi
+        .detectAllFaces(videoElement, new window.faceapi.TinyFaceDetectorOptions())
+        .withFaceExpressions();
+
+      const ctx = canvasElement.getContext('2d');
+      ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+      if (detections.length > 0) {
+        const detection = detections[0];
+        const expressions = detection.expressions;
+
+        let maxEmotion = 'neutral';
+        let maxConfidence = 0;
+        const labels = ['angry', 'disgusted', 'fearful', 'happy', 'neutral', 'sad', 'surprised'];
+
+        labels.forEach(em => {
+          if (expressions[em] > maxConfidence) {
+            maxConfidence = expressions[em];
+            maxEmotion = em;
+          }
+        });
+
+        updateEmotionHistory(maxEmotion, maxConfidence);
+        
+        // Draw
+        const box = detection.detection.box;
+        ctx.strokeStyle = 'rgba(120, 120, 255, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(box.x, box.y, box.width, box.height);
+        ctx.fillStyle = 'rgba(120, 120, 255, 0.9)';
+        ctx.font = 'bold 14px Inter, sans-serif';
+        ctx.fillText(
+          `${maxEmotion.toUpperCase()} ${(maxConfidence * 100).toFixed(0)}%`,
+          box.x,
+          box.y > 18 ? box.y - 6 : box.y + box.height + 18
+        );
+      } else {
+        updateEmotionHistory('No face detected', 0);
+      }
+    } catch(e) {}
+  }, 100);
+}
+
+function updateEmotionHistory(emotion, confidence) {
+  const now = Date.now();
+  const validWindow = 1500;
+  
+  let history = state.emotionHistory;
+  history.push({ timestamp: now, emotion, confidence });
+  history = history.filter(item => now - item.timestamp < validWindow);
+  
+  const scores = {};
+  history.forEach(item => {
+    const ageSeconds = (now - item.timestamp) / 1000;
+    const weight = Math.pow(0.5, ageSeconds);
+    const score = (item.confidence || 1.0) * weight;
+    scores[item.emotion] = (scores[item.emotion] || 0) + score;
+  });
+
+  let dominant = 'neutral';
+  let maxScore = 0;
+  for (const [em, score] of Object.entries(scores)) {
+    if (score > maxScore) {
+      maxScore = score;
+      dominant = em;
+    }
+  }
+
+  state.emotionHistory = history;
+  state.dominantEmotion = dominant;
+  state.emotionData.emotion = emotion;
+  state.emotionData.confidence = confidence;
+
+  // Manual DOM update to prevent disrupting the video stream
+  const valEl = document.getElementById('emo-val');
+  const confEl = document.getElementById('emo-conf');
+  const emojiEl = document.getElementById('emo-emoji');
+  
+  const map = {
+    happy: '😊', sad: '😢', angry: '😠', fearful: '😨',
+    disgusted: '🤢', surprised: '😲', neutral: '😐',
+    'No face detected': '🔍'
+  };
+
+  if (valEl) valEl.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+  if (confEl) {
+    confEl.style.display = confidence > 0 ? 'inline' : 'none';
+    confEl.textContent = (confidence * 100).toFixed(1) + '% confident';
+  }
+  if (emojiEl) emojiEl.textContent = map[emotion.toLowerCase()] || '🎭';
+}
+
+function renderEmotionSidebar() {
+  const container = document.getElementById('emotion-app');
+  if (!container || !state.showEmotionDetection) {
+    if (container) container.innerHTML = '';
+    return;
+  }
+
+  // Only replace innerHTML if empty, or just toggle classes / values
+  const existing = document.getElementById('emo-sidebar-container');
+  if (existing) {
+    existing.className = `emotion-sidebar open ${state.isEmotionCollapsed ? 'collapsed' : ''}`;
+    const body = document.getElementById('emo-sidebar-body');
+    if (body) body.style.display = state.isEmotionCollapsed ? 'none' : 'flex';
+    const expandBtn = document.getElementById('emo-toggle-btn');
+    if (expandBtn) expandBtn.innerHTML = state.isEmotionCollapsed ? '«' : '»';
+    const titleText = document.getElementById('emo-title-text');
+    if (titleText) titleText.style.display = state.isEmotionCollapsed ? 'none' : 'inline';
+    
+    // Show/hide error and loading messages dynamically
+    const bodyEl = document.getElementById('emo-sidebar-body');
+    if (bodyEl) {
+      let errEl = document.getElementById('emo-error-msg');
+      let loadEl = document.getElementById('emo-load-msg');
+      
+      if (state.emotionError) {
+        if (!errEl) {
+          errEl = document.createElement('div');
+          errEl.id = 'emo-error-msg';
+          errEl.className = 'emo-error';
+          bodyEl.prepend(errEl);
+        }
+        errEl.textContent = state.emotionError;
+        if (loadEl) loadEl.remove();
+      } else {
+        if (errEl) errEl.remove();
+        if (state.emotionLoading) {
+          if (!loadEl) {
+            loadEl = document.createElement('div');
+            loadEl.id = 'emo-load-msg';
+            loadEl.className = 'emo-loading';
+            loadEl.textContent = 'Loading models…';
+            bodyEl.prepend(loadEl);
+          }
+        } else {
+          if (loadEl) loadEl.remove();
+        }
+      }
+    }
+    return;
+  }
+
+  const map = {
+    happy: '😊', sad: '😢', angry: '😠', fearful: '😨',
+    disgusted: '🤢', surprised: '😲', neutral: '😐',
+    'No face detected': '🔍'
+  };
+  const currentEmo = state.emotionData.emotion;
+  const emoji = map[currentEmo.toLowerCase()] || '🎭';
+  const displayEmo = currentEmo.charAt(0).toUpperCase() + currentEmo.slice(1);
+  const conf = state.emotionData.confidence;
+
+  const errHtml = state.emotionError ? `<div class="emo-error" id="emo-error-msg">${escapeHtml(state.emotionError)}</div>` : '';
+  const loadHtml = (state.emotionLoading && !state.emotionError) ? `<div class="emo-loading" id="emo-load-msg">Loading models…</div>` : '';
+
+  container.innerHTML = `
+    <aside id="emo-sidebar-container" class="emotion-sidebar open ${state.isEmotionCollapsed ? 'collapsed' : ''}">
+      <div class="emo-sidebar-header">
+        <div class="emo-sidebar-title">
+          <span class="emo-icon">🎭</span>
+          <span id="emo-title-text" style="display:${state.isEmotionCollapsed ? 'none' : 'inline'}">Emotion Lens</span>
+        </div>
+        <div class="emo-sidebar-controls">
+          <button class="emo-ctrl-btn" id="emo-toggle-btn" title="Toggle Size">
+            ${state.isEmotionCollapsed ? '«' : '»'}
+          </button>
+          <button class="emo-ctrl-btn close" id="emo-close-btn" title="Close">✕</button>
+        </div>
+      </div>
+
+      <div class="emo-sidebar-body" id="emo-sidebar-body" style="display:${state.isEmotionCollapsed ? 'none' : 'flex'}">
+        ${errHtml}
+        ${loadHtml}
+
+        <div class="emo-video-wrap">
+          <video id="emo-video" class="emo-video" playsinline muted style="transform: scaleX(-1)"></video>
+          <canvas id="emo-canvas" class="emo-canvas"></canvas>
+        </div>
+
+        <div class="emo-badge">
+          <span class="emo-badge-emoji" id="emo-emoji">${emoji}</span>
+          <div class="emo-badge-info">
+            <span class="emo-badge-label">Detected</span>
+            <span class="emo-badge-value" id="emo-val">${escapeHtml(displayEmo)}</span>
+            <span class="emo-badge-conf" id="emo-conf" style="display:${conf > 0 ? 'inline' : 'none'}">${(conf * 100).toFixed(1)}% confident</span>
+          </div>
+        </div>
+
+        <ul class="emo-tips">
+          <li>📷 Good lighting helps</li>
+          <li>😊 Centre your face</li>
+          <li>⏱ Continuous analysis</li>
+        </ul>
+      </div>
+    </aside>
+  `;
+
+  document.getElementById('emo-toggle-btn')?.addEventListener('click', () => {
+    state.isEmotionCollapsed = !state.isEmotionCollapsed;
+    renderEmotionSidebar();
+  });
+  
+  document.getElementById('emo-close-btn')?.addEventListener('click', stopEmotionDetection);
+}

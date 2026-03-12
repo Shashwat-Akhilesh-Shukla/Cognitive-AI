@@ -48,68 +48,80 @@ graph TB
     subgraph "Client Layer"
         WEB[Web Browser]
         VOICE[Voice Interface]
+        CAMERA[Camera / Webcam]
     end
-    
+
+    subgraph "Security Layer"
+        ENCRYPT[Encryption<br/>AES-256 / TLS]
+        DECRYPT[Decryption<br/>AES-256 / TLS]
+    end
+
     subgraph "API Gateway"
         FASTAPI[FastAPI Server<br/>Port 8000]
     end
-    
+
     subgraph "Authentication"
         JWT[JWT Auth Service]
         AUTH_DB[(User Database<br/>PostgreSQL)]
     end
-    
+
+    subgraph "Emotion Recognition"
+        FACE_API[Face API<br/>Emotion Detection]
+        EMOTION_CACHE[Emotion Cache<br/>Redis]
+    end
+
     subgraph "Core Services"
         CHAT[Chat Service]
         VOICE_WS[Voice WebSocket Handler]
         PDF[PDF Loader Service]
         CONV[Conversation Manager]
     end
-    
+
     subgraph "Memory Systems"
         STM[Short-Term Memory<br/>Redis]
         LTM[Long-Term Memory<br/>Pinecone Vector DB]
-        CONV_DB[(Conversations & Messages<br/>PostgreSQL)]
+        CONV_DB[(Conversations and Messages<br/>PostgreSQL)]
     end
-    
+
     subgraph "AI Models"
         WHISPER[Whisper STT<br/>faster-whisper]
         COQUI[Coqui TTS<br/>Tacotron2]
         PERPLEXITY[Perplexity API<br/>LLM Reasoning]
         JINA[Jina Embeddings API<br/>Vector Embeddings]
     end
-    
-    WEB -->|HTTP/REST| FASTAPI
-    VOICE -->|WebSocket| FASTAPI
-    
+
+    WEB -->|HTTPS / Encrypted| ENCRYPT
+    VOICE -->|WSS / Encrypted| ENCRYPT
+    CAMERA -->|Video Frames| FACE_API
+    ENCRYPT --> FASTAPI
+    FASTAPI --> DECRYPT
+    DECRYPT -->|Plaintext Response| WEB
+
     FASTAPI --> JWT
     JWT --> AUTH_DB
-    
+
+    FACE_API -->|Emotion Label| EMOTION_CACHE
+    EMOTION_CACHE -->|Emotion Context| CHAT
+
     FASTAPI --> CHAT
     FASTAPI --> VOICE_WS
     FASTAPI --> PDF
     FASTAPI --> CONV
-    
+
     CHAT --> STM
     CHAT --> LTM
     CHAT --> CONV_DB
     CHAT --> PERPLEXITY
-    
+
     VOICE_WS --> WHISPER
     VOICE_WS --> COQUI
     VOICE_WS --> CHAT
-    
+
     PDF --> LTM
     PDF --> JINA
-    
+
     LTM --> JINA
     CONV --> CONV_DB
-    
-    style FASTAPI fill:#00d4aa
-    style STM fill:#dc382d
-    style LTM fill:#ff6b00
-    style WHISPER fill:#4a90e2
-    style COQUI fill:#4a90e2
 ```
 
 ### Data Flow Architecture
@@ -117,34 +129,44 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant User
+    participant TLS as TLS Encryption
     participant FastAPI
     participant Auth
+    participant FaceAPI as Face API
+    participant EmotionCache as Emotion Cache
     participant STM
     participant LTM
     participant Reasoning
     participant Perplexity
     participant Database
-    
-    User->>FastAPI: POST /chat (with JWT)
+
+    User->>TLS: POST /chat (plaintext + JWT)
+    TLS->>FastAPI: Encrypted request (TLS)
     FastAPI->>Auth: Verify Token
     Auth-->>FastAPI: user_id
-    
+
+    Note over FaceAPI,EmotionCache: Parallel emotion detection
+    FaceAPI->>EmotionCache: Store emotion label (e.g. anxious)
+    FastAPI->>EmotionCache: Fetch current emotion for user_id
+    EmotionCache-->>FastAPI: Emotion context
+
     FastAPI->>STM: Get Recent Context
     STM-->>FastAPI: Recent Memories
-    
+
     FastAPI->>LTM: Semantic Search
     LTM-->>FastAPI: Relevant Long-term Memories
-    
-    FastAPI->>Reasoning: Process Message
-    Reasoning->>Perplexity: Generate Response
+
+    FastAPI->>Reasoning: Process Message + Emotion Context
+    Reasoning->>Perplexity: Generate Emotion-Aware Response
     Perplexity-->>Reasoning: AI Response
     Reasoning-->>FastAPI: Response + Memory Actions
-    
+
     FastAPI->>STM: Store New Context
     FastAPI->>LTM: Store Important Facts
     FastAPI->>Database: Save Message to Conversation
-    
-    FastAPI-->>User: Stream Response
+
+    FastAPI->>TLS: Encrypt response
+    TLS-->>User: Encrypted stream response
 ```
 
 ### Voice Agent Architecture
@@ -154,38 +176,49 @@ graph LR
     subgraph "Client"
         MIC[Microphone]
         SPEAKER[Speaker]
+        CAMERA[Camera]
     end
-    
+
+    subgraph "Security"
+        WSS[WSS Encryption]
+    end
+
+    subgraph "Emotion Recognition"
+        FACE_API[Face API<br/>Emotion Detection]
+        EMOTION_CACHE[Emotion Cache<br/>Redis]
+    end
+
     subgraph "WebSocket Pipeline"
         WS[WebSocket Handler]
         BUFFER[Audio Buffer]
     end
-    
+
     subgraph "Processing"
-        STT[Whisper STT<br/>Speech→Text]
-        REASON[Reasoning Engine<br/>LLM Processing]
-        TTS[Coqui TTS<br/>Text→Speech]
+        STT[Whisper STT<br/>Speech to Text]
+        REASON[Reasoning Engine<br/>LLM + Emotion Context]
+        TTS[Coqui TTS<br/>Text to Speech]
     end
-    
+
     subgraph "Storage"
         CONV_STORE[(Conversation DB)]
         MEM_STORE[(Memory Systems)]
     end
-    
-    MIC -->|Audio Chunks| WS
+
+    CAMERA -->|Video Frames| FACE_API
+    FACE_API -->|Emotion Label| EMOTION_CACHE
+    EMOTION_CACHE -->|Emotion Context| REASON
+
+    MIC -->|Audio Chunks| WSS
+    WSS -->|Encrypted Audio| WS
     WS --> BUFFER
     BUFFER -->|Complete Audio| STT
     STT -->|Transcript| REASON
     REASON -->|Response Text| TTS
-    TTS -->|Audio| WS
-    WS -->|Audio Stream| SPEAKER
-    
+    TTS -->|Audio| WSS
+    WSS -->|Encrypted Audio Stream| SPEAKER
+
     REASON --> CONV_STORE
     REASON --> MEM_STORE
-    
-    style STT fill:#4a90e2
-    style TTS fill:#4a90e2
-    style REASON fill:#00d4aa
 ```
 
 ### Database Schema
