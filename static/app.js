@@ -15,7 +15,6 @@ let state = {
   uploadProgress: 0,
   fileInfo: null,
   error: '',
-  error: '',
   isDark: false,
   // Emotion Detection
   showEmotionDetection: false,
@@ -641,6 +640,8 @@ function toggleProfileDropdown() {
 }
 
 async function switchProvider(provider) {
+  if (provider === state.aiProvider) return;
+  
   state.aiProvider = provider;
   try { localStorage.setItem('cognitiveai_provider', provider); } catch (_) {}
   
@@ -649,7 +650,7 @@ async function switchProvider(provider) {
 
   // Sync with backend
   try {
-    await fetch(`${API_BASE}/ai/provider`, {
+    const res = await fetch(`${API_BASE}/ai/provider`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -657,6 +658,10 @@ async function switchProvider(provider) {
       },
       body: JSON.stringify({ provider }),
     });
+    
+    if (!res.ok) {
+      console.warn(`Backend provider sync responded with status ${res.status}`);
+    }
   } catch (e) {
     console.error('Failed to sync provider with backend:', e);
   }
