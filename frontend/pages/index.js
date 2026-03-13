@@ -9,18 +9,28 @@ export default function Home() {
   const [chats, setChats] = useState([])
   const [currentChatId, setCurrentChatId] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [aiProvider, setAiProvider] = useState('gemini')
 
-  // Load auth state from localStorage on mount
+  // Load auth state and provider from localStorage on mount
   useEffect(() => {
     const savedToken = localStorage.getItem('cognitiveai_token')
     const savedUser = localStorage.getItem('cognitiveai_user')
+    const savedProvider = localStorage.getItem('cognitiveai_provider')
 
     if (savedToken && savedUser) {
       setToken(savedToken)
       setUser(JSON.parse(savedUser))
     }
+    if (savedProvider) {
+      setAiProvider(savedProvider)
+    }
     setLoading(false)
   }, [])
+
+  // Persist provider changes
+  useEffect(() => {
+    localStorage.setItem('cognitiveai_provider', aiProvider)
+  }, [aiProvider])
 
   // Load messages when switching to a different chat
   useEffect(() => {
@@ -217,6 +227,8 @@ export default function Home() {
         user={user}
         onLogout={handleLogout}
         token={token}
+        aiProvider={aiProvider}
+        setAiProvider={setAiProvider}
       />
       <Chat
         chats={chats}
@@ -225,6 +237,7 @@ export default function Home() {
         updateChats={updateChats}
         token={token}
         onStreamComplete={loadMessages}
+        aiProvider={aiProvider}
       />
     </div>
   )

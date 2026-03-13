@@ -8,7 +8,7 @@ import { cleanResponse } from '../utils/responseCleaner'
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Chat.js:', BACKEND_URL)
 
-export default function Chat({ chats, currentChatId, setCurrentChatId, updateChats, token, onStreamComplete }) {
+export default function Chat({ chats, currentChatId, setCurrentChatId, updateChats, token, onStreamComplete, aiProvider }) {
   const [text, setText] = useState('')
   const [attachingFile, setAttachingFile] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -75,7 +75,8 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
 
     const payload = {
       message: displayedMessage,
-      emotion: emotionContext
+      emotion: emotionContext,
+      provider: aiProvider
     }
 
     // Pass conversation_id if not a temporary chat

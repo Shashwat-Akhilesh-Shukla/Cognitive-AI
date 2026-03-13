@@ -30,6 +30,7 @@ let state = {
   emotionHistory: [],
   dominantEmotion: 'neutral',
   isEmotionCollapsed: false,
+  aiProvider: localStorage.getItem('cognitiveai_provider') || 'gemini',
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -237,6 +238,7 @@ function renderSidebar() {
       </div>
 
       <div class="sidebar-footer">
+        ${renderProviderSelector()}
         ${state.user ? `
           <div class="profile-card-wrapper" id="profile-wrapper">
             <button class="profile-card" id="profile-btn" aria-haspopup="true" title="Account options">
@@ -251,6 +253,29 @@ function renderSidebar() {
         ` : ''}
       </div>
     </aside>
+  `;
+}
+
+function renderProviderSelector() {
+  const current = state.aiProvider;
+  return `
+    <div class="provider-selector">
+      <div class="provider-label">AI Intelligence</div>
+      <div class="provider-options">
+        <button
+          class="provider-opt-btn ${current === 'gemini' ? 'active' : ''}"
+          data-provider="gemini"
+        >
+          Gemini
+        </button>
+        <button
+          class="provider-opt-btn ${current === 'perplexity' ? 'active' : ''}"
+          data-provider="perplexity"
+        >
+          Perplexity
+        </button>
+      </div>
+    </div>
   `;
 }
 
@@ -471,6 +496,16 @@ function attachMainListeners() {
     });
   }
 
+  // Provider selector toggles
+  document.querySelectorAll('.provider-opt-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const provider = btn.dataset.provider;
+      if (provider && provider !== state.aiProvider) {
+        switchProvider(provider);
+      }
+    });
+  });
+
   // Close menus on outside click
   document.addEventListener('click', closeAllMenus, { once: false });
 }
@@ -603,6 +638,28 @@ function toggleProfileDropdown() {
   // Update chevron
   const chevron = document.getElementById('profile-chevron');
   if (chevron) chevron.textContent = '▴';
+}
+
+async function switchProvider(provider) {
+  state.aiProvider = provider;
+  try { localStorage.setItem('cognitiveai_provider', provider); } catch (_) {}
+  
+  // Optimistic re-render
+  render();
+
+  // Sync with backend
+  try {
+    await fetch(`${API_BASE}/ai/provider`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.token}`
+      },
+      body: JSON.stringify({ provider }),
+    });
+  } catch (e) {
+    console.error('Failed to sync provider with backend:', e);
+  }
 }
 
 // ─── CONVERSATIONS ────────────────────────────────────────────────────────────
@@ -826,7 +883,11 @@ async function sendMessage() {
   state.attachingFile = null;
 
   // Payload
-  const payload = { message: displayedMessage, emotion: state.dominantEmotion };
+  const payload = { 
+    message: displayedMessage, 
+    emotion: state.dominantEmotion,
+    provider: state.aiProvider
+  };
   if (!currentChat.isTemp) payload.conversation_id = state.currentChatId;
   if (sentFileInfo?.doc_id) payload.doc_id = sentFileInfo.doc_id;
 

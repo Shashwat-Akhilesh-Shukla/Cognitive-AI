@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react'
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 console.log('BACKEND_URL in Sidebar.js:', BACKEND_URL)
 
-export default function Sidebar({ chats, currentChatId, setCurrentChatId, updateChats, user, onLogout, token }) {
+export default function Sidebar({ chats, currentChatId, setCurrentChatId, updateChats, user, onLogout, token, aiProvider, setAiProvider }) {
   function createNew() {
     const newChat = {
       id: 'temp-' + nanoid(6),
@@ -92,9 +92,58 @@ export default function Sidebar({ chats, currentChatId, setCurrentChatId, update
       </div>
 
       <div className="sidebar-footer">
+        <ProviderSelector
+          current={aiProvider}
+          onChange={setAiProvider}
+          token={token}
+        />
         {user && <ProfileCard user={user} onLogout={handleLogout} />}
       </div>
     </aside>
+  )
+}
+
+/* ===== PROVIDER SELECTOR ===== */
+function ProviderSelector({ current, onChange, token }) {
+  async function handleSwitch(provider) {
+    if (provider === current) return
+    
+    // Optimistic update
+    onChange(provider)
+
+    // Sync with backend (optional but recommended)
+    try {
+      await fetch(`${BACKEND_URL}/ai/provider`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ provider })
+      })
+    } catch (e) {
+      console.error('Failed to sync provider with backend:', e)
+    }
+  }
+
+  return (
+    <div className="provider-selector">
+      <div className="provider-label">AI Intelligence</div>
+      <div className="provider-options">
+        <button
+          className={`provider-opt-btn ${current === 'gemini' ? 'active' : ''}`}
+          onClick={() => handleSwitch('gemini')}
+        >
+          Gemini
+        </button>
+        <button
+          className={`provider-opt-btn ${current === 'perplexity' ? 'active' : ''}`}
+          onClick={() => handleSwitch('perplexity')}
+        >
+          Perplexity
+        </button>
+      </div>
+    </div>
   )
 }
 
