@@ -10,13 +10,13 @@ import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 import logging
-import httpx
 import os
 import json
 from backend.memory.stm import STMManager
 from backend.memory.ltm import LTMManager
 from backend.pdf_loader import PDFLoader
 from backend.prompts import THERAPIST_SYSTEM_PROMPT, VOICE_MODE_SYSTEM_PROMPT
+from backend.ai_providers import AIProviderBase
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,16 @@ class CognitiveReasoningEngine:
     5. Update: Store conversation highlights and update memory
     """
 
-    def __init__(self, stm_manager: STMManager, ltm_manager: LTMManager,
-                 pdf_loader: PDFLoader, perplexity_api_key: str,
-                 model: str = "sonar"):
+    def __init__(
+        self,
+        stm_manager: STMManager,
+        ltm_manager: LTMManager,
+        pdf_loader: PDFLoader,
+        provider: Optional[AIProviderBase] = None,
+        # Kept for backward compatibility — ignored when provider is supplied
+        perplexity_api_key: str = "",
+        model: str = "",
+    ):
         """
         Initialize the reasoning engine.
 
@@ -43,17 +50,33 @@ class CognitiveReasoningEngine:
             stm_manager: Short-term memory manager
             ltm_manager: Long-term memory manager
             pdf_loader: PDF knowledge loader
-            perplexity_api_key: Perplexity API key
-            model: Perplexity model to use
+            provider: Active AIProviderBase instance (Gemini or Perplexity)
+            perplexity_api_key: Deprecated — kept for health-check backward compat
+            model: Deprecated — model is taken from provider
         """
         self.stm_manager = stm_manager
         self.ltm_manager = ltm_manager
         self.pdf_loader = pdf_loader
-        self.model = model
-        self.perplexity_api_key = perplexity_api_key
+        self._provider = provider
 
-        
+        # Backward-compat attributes used by the existing /health endpoint
+        self.perplexity_api_key = perplexity_api_key
+        self.model = model or (provider.model if provider else "")
+
         self.max_history_length = 10
+
+    @property
+    def provider(self) -> Optional[AIProviderBase]:
+        """Return the currently active AI provider."""
+        # Allow registry to be queried live so runtime switches take effect
+        try:
+            from backend.ai_providers import get_registry
+            registry = get_registry()
+            if registry.active_name:
+                return registry.active_provider
+        except Exception:
+            pass
+        return self._provider
 
     async def process_message(self, user_message: str, user_id: str = "default",
                         stm_memories: Optional[List[Dict[str, Any]]] = None,
@@ -276,168 +299,81 @@ class CognitiveReasoningEngine:
         
         return stm_count > 0 and ltm_count > 0
 
-    async def _generate_response(self, response_plan: Dict[str, Any], processed_input: Dict[str, Any], recalled_info: Dict[str, Any], stream: bool = False, voice_mode: bool = False):
+    async def _generate_response(
+        self,
+        response_plan: Dict[str, Any],
+        processed_input: Dict[str, Any],
+        recalled_info: Dict[str, Any],
+        stream: bool = False,
+        voice_mode: bool = False,
+    ):
         """
-        Generate the actual response using the Perplexity API.
+        Generate a response using the active AI provider.
 
         Args:
             response_plan: The planned response strategy and context
-            stream: If True, yields chunks as they arrive (async generator)
-            voice_mode: If True, uses voice-specific prompt and shorter token limit
+            stream: If True, returns an async generator of chunks
+            voice_mode: If True, uses voice prompt and shorter token limit
 
         Returns:
-            Generated response string (if stream=False) or async generator of chunks (if stream=True)
+            Response string (stream=False) or async generator of chunks (stream=True)
         """
         strategy = response_plan.get("strategy", "general_response")
         context = response_plan.get("context_to_use", {})
 
-        
         # Inject emotion into context for prompt builder
         if response_plan.get("user_emotion"):
             context["user_emotion"] = response_plan.get("user_emotion")
 
-        # Use voice-specific prompt if in voice mode
         if voice_mode:
             system_prompt = VOICE_MODE_SYSTEM_PROMPT
-            max_tokens = 100  # Much shorter for voice responses
+            max_tokens = 100
             logger.info("[VOICE_MODE] Using voice-specific prompt with max_tokens=100")
         else:
             system_prompt = self._build_system_prompt(strategy, context)
             max_tokens = 4000
-        
-        user_prompt = self._build_user_prompt(response_plan, processed_input, recalled_info, voice_mode=voice_mode)
 
-        
-        url = "https://api.perplexity.ai/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.perplexity_api_key}",
-            "Content-Type": "application/json"
-        }
+        user_prompt = self._build_user_prompt(
+            response_plan, processed_input, recalled_info, voice_mode=voice_mode
+        )
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "max_tokens": max_tokens,
-            "temperature": 0.7,
-            "stream": stream
-        }
-        
-        # DEBUG: Log final messages payload
-        logger.info(f"LLM messages payload: {json.dumps(payload['messages'], indent=2)}")
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
 
-        timeout_seconds = 60.0 if stream else 20.0
-        max_retries = 2
-        attempt = 0
+        logger.info(f"LLM request via provider='{self.provider.name if self.provider else 'none'}' messages={json.dumps(messages, indent=2)}")
+
+        active_provider = self.provider
+        if active_provider is None:
+            return "No AI provider is configured. Please check your API keys."
+
+        # Update model attribute to reflect the current provider
+        self.model = active_provider.model
 
         if stream:
-            # Return async generator for streaming
-            return self._stream_response(url, headers, payload, max_retries)
-        
-        # Original non-streaming logic
-        async with httpx.AsyncClient() as client:
-            while True:
-                attempt += 1
-                try:
-                    resp = await client.post(url, headers=headers, json=payload, timeout=timeout_seconds)
-                    if resp.status_code == 429:
-                        
-                        retry_after = resp.headers.get("Retry-After")
-                        wait = int(retry_after) if retry_after and retry_after.isdigit() else (2 ** attempt)
-                        if attempt <= max_retries:
-                            await asyncio.sleep(wait)
-                            continue
-                        else:
-                            logger.error(f"Perplexity returned 429 too many times")
-                            return "I'm being rate limited. Please try again later."
+            return self._stream_response_via_provider(active_provider, messages, max_tokens)
 
-                    if 500 <= resp.status_code < 600:
-                        if attempt <= max_retries:
-                            await asyncio.sleep(1 + attempt)
-                            continue
-                        else:
-                            logger.error(f"Perplexity server error {resp.status_code}")
-                            return "I'm having trouble contacting the knowledge service; please try again later."
+        # Non-streaming path
+        try:
+            return await active_provider.generate(messages, max_tokens=max_tokens)
+        except Exception as exc:
+            logger.error(f"Provider '{active_provider.name}' generate failed: {exc}")
+            return "I apologize, but I'm having trouble generating a response right now. Please try again."
 
-                    resp.raise_for_status()
-                    result = resp.json()
-                    return result.get("choices", [])[0].get("message", {}).get("content", "").strip()
-
-                except httpx.RequestError as e:
-                    logger.warning(f"Perplexity request error (attempt {attempt}): {e}")
-                    if attempt <= max_retries:
-                        await asyncio.sleep(1 + attempt)
-                        continue
-                    return "I apologize, but I'm having trouble generating a response right now. Please try again."
-                except Exception as e:
-                    logger.error(f"Error generating response: {e}")
-                    return "I apologize, but I'm having trouble generating a response right now. Please try again."
-
-
-    async def _stream_response(self, url: str, headers: Dict[str, str], payload: Dict[str, Any], max_retries: int):
+    async def _stream_response_via_provider(self, provider: AIProviderBase, messages: List[Dict[str, str]], max_tokens: int):
         """
-        Stream response chunks from Perplexity API.
-        
+        Delegate streaming to the active provider.
+
         Yields:
-            String chunks as they arrive from the API
+            String chunks as they arrive from the provider
         """
-        attempt = 0
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            while True:
-                attempt += 1
-                try:
-                    async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                        if resp.status_code == 429:
-                            retry_after = resp.headers.get("Retry-After")
-                            wait = int(retry_after) if retry_after and retry_after.isdigit() else (2 ** attempt)
-                            if attempt <= max_retries:
-                                await asyncio.sleep(wait)
-                                continue
-                            else:
-                                logger.error(f"Perplexity returned 429 too many times")
-                                yield "I'm being rate limited. Please try again later."
-                                return
-
-                        if 500 <= resp.status_code < 600:
-                            if attempt <= max_retries:
-                                await asyncio.sleep(1 + attempt)
-                                continue
-                            else:
-                                logger.error(f"Perplexity server error {resp.status_code}")
-                                yield "I'm having trouble contacting the knowledge service; please try again later."
-                                return
-
-                        resp.raise_for_status()
-                        
-                        # Parse SSE stream
-                        async for line in resp.aiter_lines():
-                            if line.startswith("data: "):
-                                data = line[6:]  # Remove "data: " prefix
-                                if data.strip() == "[DONE]":
-                                    return
-                                try:
-                                    chunk = json.loads(data)
-                                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                    content = delta.get("content", "")
-                                    if content:
-                                        yield content
-                                except json.JSONDecodeError:
-                                    continue
-                        return
-
-                except httpx.RequestError as e:
-                    logger.warning(f"Perplexity streaming request error (attempt {attempt}): {e}")
-                    if attempt <= max_retries:
-                        await asyncio.sleep(1 + attempt)
-                        continue
-                    yield "I apologize, but I'm having trouble generating a response right now. Please try again."
-                    return
-                except Exception as e:
-                    logger.error(f"Error streaming response: {e}")
-                    yield "I apologize, but I'm having trouble generating a response right now. Please try again."
-                    return
+        try:
+            async for chunk in provider.stream(messages, max_tokens=max_tokens):
+                yield chunk
+        except Exception as exc:
+            logger.error(f"Provider '{provider.name}' stream failed: {exc}")
+            yield "I apologize, but I'm having trouble generating a response right now. Please try again."
 
     def _build_system_prompt(self, strategy: str, context: Dict[str, Any]) -> str:
         """Build the system prompt based on response strategy."""
@@ -601,18 +537,20 @@ Simply adapt your therapeutic approach to be empathetic to this emotional state.
 
     def get_reasoning_stats(self) -> Dict[str, Any]:
         """Get statistics about the reasoning engine's performance."""
-        
+        provider = self.provider
         return {
-            "model": self.model,
-            "note": "Call `get_reasoning_stats_for_user(user_id)` for per-user stats"
+            "model": provider.model if provider else self.model,
+            "provider": provider.name if provider else "none",
+            "note": "Call `get_reasoning_stats_for_user(user_id)` for per-user stats",
         }
 
     def get_reasoning_stats_for_user(self, user_id: str) -> Dict[str, Any]:
         """Get per-user reasoning stats to avoid exposing cross-user data."""
-        
+        provider = self.provider
         return {
             "note": "Reasoning engine is stateless; collect STM/conv stats from stores directly",
-            "model": self.model
+            "model": provider.model if provider else self.model,
+            "provider": provider.name if provider else "none",
         }
 
     def clear_short_term_memory(self):

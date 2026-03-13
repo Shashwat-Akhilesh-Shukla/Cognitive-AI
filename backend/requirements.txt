@@ -25,6 +25,9 @@ psycopg2
 # HTTP Client
 httpx>=0.25.0
 
+# AI Providers
+google-generativeai>=0.8.0
+
 # Vector Database (Pinecone)
 pinecone-client>=2.2.0
 

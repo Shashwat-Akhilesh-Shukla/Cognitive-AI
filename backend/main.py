@@ -40,6 +40,7 @@ from backend.conversations import ConversationManager
 from backend.voice.websocket_handler import VoiceWebSocketHandler
 from backend.voice.model_manager import ModelManager
 from backend.response_cleaner import clean_response
+from backend.ai_providers import init_providers, get_registry
 
 
 logging.basicConfig(level=logging.INFO)
@@ -117,6 +118,12 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     doc_id: Optional[str] = None
     emotion: Optional[str] = "neutral"
+    provider: Optional[str] = None  # Override active provider for this request
+
+
+class ProviderSwitchRequest(BaseModel):
+    """Request model for the /ai/provider switch endpoint."""
+    provider: str  # "gemini" or "perplexity"
 
 
 class ChatResponse(BaseModel):
@@ -178,9 +185,10 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> str:
 
 def validate_environment():
     """Validate required environment variables at startup."""
-    required_vars = ["JWT_SECRET_KEY", "REDIS_URL", "PERPLEXITY_API_KEY"]
+    # Hard requirements
+    hard_required = ["JWT_SECRET_KEY", "REDIS_URL"]
     missing = []
-    for var in required_vars:
+    for var in hard_required:
         val = os.getenv(var)
         if not val:
             missing.append(var)
@@ -189,6 +197,14 @@ def validate_environment():
 
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+    # At least one AI provider key is required
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    perplexity_key = os.getenv("PERPLEXITY_API_KEY", "")
+    if not gemini_key and not perplexity_key:
+        raise RuntimeError(
+            "At least one AI provider key is required: GEMINI_API_KEY or PERPLEXITY_API_KEY"
+        )
 
     logger.info("✓ Environment validation passed")
 
@@ -234,16 +250,31 @@ def initialize_memory_systems():
         
         pdf_loader = PDFLoader(ltm_manager)
 
-        
-        perplexity_api_key = os.getenv("PERPLEXITY_API_KEY")
+        # Initialize AI providers (Gemini default, Perplexity fallback)
+        gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+        perplexity_api_key = os.getenv("PERPLEXITY_API_KEY", "")
+        preferred_provider = os.getenv("AI_PROVIDER", "gemini")
+
+        if not gemini_api_key:
+            logger.warning("GEMINI_API_KEY not set — GeminiProvider will be unavailable")
         if not perplexity_api_key:
-            logger.warning("PERPLEXITY_API_KEY not set. Chat will not work.")
+            logger.warning("PERPLEXITY_API_KEY not set — PerplexityProvider will be unavailable")
+
+        provider_registry = init_providers(
+            gemini_api_key=gemini_api_key,
+            perplexity_api_key=perplexity_api_key,
+            preferred=preferred_provider,
+        )
+        active_provider = provider_registry.active_provider
+        logger.info(f"Active AI provider: {active_provider.name} (model={active_provider.model})")
 
         reasoning_engine = CognitiveReasoningEngine(
             stm_manager=stm_manager,
             ltm_manager=ltm_manager,
             pdf_loader=pdf_loader,
-            perplexity_api_key=perplexity_api_key or ""
+            provider=active_provider,
+            # Keep perplexity_api_key for backward-compat health check
+            perplexity_api_key=perplexity_api_key,
         )
 
         # Initialize conversation manager
@@ -371,8 +402,15 @@ async def health_check():
     health_status["services"]["pinecone"] = pinecone_health
 
     # Perplexity health check — use a real minimal POST (HEAD returns 405)
-    api_key = (reasoning_engine.perplexity_api_key if reasoning_engine else None) or os.getenv("PERPLEXITY_API_KEY", "")
-    perplexity_health = {"available": bool(api_key), "status": "unknown"}
+    perplexity_key = os.getenv("PERPLEXITY_API_KEY", "")
+    try:
+        registry = get_registry()
+        perplexity_provider = registry.get_provider("perplexity")
+        if perplexity_provider:
+            perplexity_key = perplexity_provider.api_key or perplexity_key
+    except Exception:
+        pass
+    perplexity_health = {"available": bool(perplexity_key), "status": "unknown"}
     if perplexity_health["available"]:
         try:
             import httpx
@@ -380,7 +418,7 @@ async def health_check():
                 resp = client.post(
                     "https://api.perplexity.ai/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {api_key}",
+                        "Authorization": f"Bearer {perplexity_key}",
                         "Content-Type": "application/json"
                     },
                     json={
@@ -408,6 +446,38 @@ async def health_check():
         perplexity_health["status"] = "not_configured"
     health_status["services"]["perplexity"] = perplexity_health
 
+    # Gemini health check
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    try:
+        registry = get_registry()
+        gemini_provider = registry.get_provider("gemini")
+        if gemini_provider:
+            gemini_key = gemini_provider.api_key or gemini_key
+    except Exception:
+        pass
+    gemini_health = {"available": bool(gemini_key), "status": "unknown"}
+    if gemini_health["available"]:
+        try:
+            import google.generativeai as genai  # type: ignore
+            genai.configure(api_key=gemini_key)
+            models = list(genai.list_models())
+            gemini_health["status"] = "ok"
+            gemini_health["models_count"] = len(models)
+        except Exception as e:
+            gemini_health["status"] = f"error: {str(e)}"
+            health_status["status"] = "degraded"
+    else:
+        gemini_health["status"] = "not_configured"
+    health_status["services"]["gemini"] = gemini_health
+
+    # Active provider info
+    try:
+        registry = get_registry()
+        health_status["active_provider"] = registry.active_name
+        health_status["providers"] = registry.list_providers()
+    except Exception:
+        health_status["active_provider"] = "unknown"
+
     # Systems overview
     health_status["systems"] = {
         "database": db is not None,
@@ -418,6 +488,65 @@ async def health_check():
     }
 
     return health_status
+
+
+@app.get("/ai/provider")
+async def get_ai_provider():
+    """
+    Get current AI provider status.
+
+    Returns the active provider name, all registered providers and their
+    availability, and the underlying model name. No authentication required.
+    """
+    try:
+        registry = get_registry()
+        return {
+            "active_provider": registry.active_name,
+            "providers": registry.list_providers(),
+            "model": registry.active_provider.model if registry.active_name else None,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Provider registry not initialised: {exc}")
+
+
+@app.post("/ai/provider")
+async def set_ai_provider(
+    request: ProviderSwitchRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Switch the active AI provider at runtime.
+
+    Changes take effect immediately for all subsequent requests (server-wide).
+    Requires authentication so anonymous users cannot disrupt the service.
+
+    Body: {"provider": "gemini"} or {"provider": "perplexity"}
+    """
+    try:
+        registry = get_registry()
+        success = registry.set_active(request.provider)
+        if not success:
+            available = [p["name"] for p in registry.list_providers() if p["available"]]
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Provider '{request.provider}' is not available. "
+                    f"Available providers: {available}"
+                ),
+            )
+        active = registry.active_provider
+        logger.info(f"User {user_id} switched AI provider to: {active.name}")
+        return {
+            "success": True,
+            "active_provider": active.name,
+            "model": active.model,
+            "message": f"Switched to {active.name} ({active.model})",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to switch provider: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to switch AI provider")
 
 
 @app.get("/test-perplexity")
