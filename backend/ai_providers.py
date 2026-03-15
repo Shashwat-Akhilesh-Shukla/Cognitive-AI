@@ -76,7 +76,7 @@ class GeminiProvider(AIProviderBase):
     """Google Gemini provider using the google-generativeai SDK."""
 
     name = "gemini"
-    default_model = "gemini-2.0-flash"
+    default_model = "gemini-2.5-flash"
 
     def __init__(self, api_key: str, model: Optional[str] = None):
         super().__init__(api_key, model)
