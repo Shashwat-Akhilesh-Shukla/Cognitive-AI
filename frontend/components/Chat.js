@@ -222,7 +222,7 @@ export default function Chat({ chats, currentChatId, setCurrentChatId, updateCha
                   console.log('[send] Triggering message reload after streaming complete (delayed by 60s)')
                   // Delayed refresh to ensure user can read the message before any potential update flicker
                   setTimeout(() => {
-                    onStreamComplete(data.conversation_id, fullResponse)
+                    onStreamComplete(data.conversation_id, cleanResponse(fullResponse))
                   }, 60000)
                 }
               } else if (data.type === 'error') {
